@@ -26,9 +26,6 @@
 #include "board.h"
 #include "simd.h"
 
-// objcopy embeds the .nnue binary and exposes these linker symbols.
-// Names are auto-derived from the filename: hyphens and dots -> underscores,
-// so catalyst-v1.nnue -> _binary_catalyst_v1_nnue_{start,end,size}
 #ifdef NNUE_EMBEDDED
 extern "C" {
 extern const uint8_t _binary_catalyst_v1_nnue_start[];
