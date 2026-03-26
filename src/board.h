@@ -51,8 +51,8 @@ static_assert(sizeof(StateInfo) == 128, "StateInfo size mismatch — check paddi
 
 // clang-format off
 inline constexpr int CASTLING_RIGHTS_MASK[SQUARE_NB] = {
-  13, 15, 15, 15, 12, 15, 15, 14,         // Rank 1: a1=~WHITE_OOO, e1=~WHITE_CASTLING, h1=~WHITE_OO
-  15, 15, 15, 15, 15, 15, 15, 15,   // Rank 2
+  13, 15, 15, 15, 12, 15, 15, 14, // Rank 1: a1=~WHITE_OOO, e1=~WHITE_CASTLING, h1=~WHITE_OO
+  15, 15, 15, 15, 15, 15, 15, 15, // Rank 2
   15, 15, 15, 15, 15, 15, 15, 15, // Rank 3
   15, 15, 15, 15, 15, 15, 15, 15, // Rank 4
   15, 15, 15, 15, 15, 15, 15, 15, // Rank 5
