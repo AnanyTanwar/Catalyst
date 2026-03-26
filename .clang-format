@@ -1,0 +1,34 @@
+Language: Cpp
+BasedOnStyle: WebKit
+
+IndentWidth: 4
+UseTab: Never
+ColumnLimit: 100
+MaxEmptyLinesToKeep: 2
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterControlStatement: true
+  BeforeCatch: true
+  BeforeElse: true
+
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveDeclarations: Consecutive
+AlignTrailingComments: true
+PointerAlignment: Right
+
+SpaceBeforeParens: ControlStatements
+SpacesBeforeTrailingComments: 2
+
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+BinPackArguments: false
+BinPackParameters: false
+
+SortIncludes: false
+Standard: c++20
+
+PenaltyBreakAssignment: 2
+PenaltyExcessCharacter: 1000000

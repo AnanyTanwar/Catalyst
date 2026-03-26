@@ -1,0 +1,1 @@
+catalyst-nnue-v1-768x64-q255
