@@ -171,6 +171,8 @@ Catalyst is free software distributed under the [GNU General Public License v3.0
 
 ## Credits
 
+**Special thanks to the Stockfish Discord community for their invaluable help with debugging, NNUE guidance, and overall support during Catalyst’s development.**
+
 Catalyst would not exist without the broader chess programming community. In no particular order, these engines and projects were notable sources of ideas and inspiration:
 
 - [Stockfish](https://github.com/official-stockfish/Stockfish)
