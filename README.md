@@ -62,7 +62,7 @@ A UCI-compliant chess engine written in C++20, featuring NNUE evaluation and a f
 - Lazy SMP (multi-threaded search)
 
 ### Evaluation
-- **NNUE** — Efficiently Updatable Neural Network
+- **NNUE** 
   - Architecture: `(768 → 64)×2 → 1`
   - Incremental accumulator updates
   - SIMD-accelerated inference (SSE4.1 / AVX2 / AVX-512)
