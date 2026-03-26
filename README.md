@@ -1,14 +1,18 @@
 <div align="center">
 
-<img src="https://i.imgur.com/R7wOg9n.png" alt="Catalyst Chess Engine" width="150" height="150"/>
+<img src="assets/logo.png" alt="Catalyst Logo" width="140"/>
+
+<br/>
 
 # Catalyst
+
+<p><em>A high-performance UCI-compliant chess engine written in C++20, featuring NNUE evaluation and advanced search.</em></p>
+
+<br/>
 
 [![License][license-badge]][license-link]
 [![GitHub release (latest by date)][release-badge]][release-link]
 [![Commits since latest release][commits-badge]][commits-link]
-
-A UCI-compliant chess engine written in C++20, featuring NNUE evaluation and a fine search.
 
 </div>
 
