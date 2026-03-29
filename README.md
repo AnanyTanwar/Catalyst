@@ -10,6 +10,18 @@ Catalyst uses a `(768 → 256)×2 → 8` neural network with incremental accumul
 
 ---
 
+## Strength
+
+Catalyst has not yet been rated by CCRL. The following ratings are based on internal testing and should be considered approximate.
+
+| Version | Estimated Elo | Test Conditions | Notes |
+|--------|--------------|----------------|------|
+| v1.0.0 | ~2800–2900 | Self-play / local testing | Initial NNUE implementation |
+| v2.0.0 | ~3000–3100 | 30+0.3 · 200 games | +230 Elo vs v1, new NNUE + search improvements |
+
+> Ratings are approximate and may vary depending on hardware, time control, and testing methodology.  
+> Official ratings will be added once Catalyst is listed on CCRL.
+
 ## Features
 
 ### Search
