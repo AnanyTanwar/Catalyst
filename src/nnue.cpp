@@ -16,6 +16,7 @@
 
 #include "nnue.h"
 #include <iostream>
+#include <algorithm>
 #ifndef NNUE_EMBEDDED
 #include <fstream>
 #endif
@@ -45,15 +46,13 @@ namespace NNUE {
         const size_t   size
             = static_cast<size_t>(_binary_catalyst_v2_nnue_end - _binary_catalyst_v2_nnue_start);
 
-        if (size < expected)
-        {
-            std::cerr << "NNUE: embedded net truncated (" << size << " bytes, need " << expected
-                      << ")\n";
+        if (size < expected) {
+            std::cerr << "NNUE: embedded net truncated (" << size << " bytes, need " << expected << ")\n";
             return false;
         }
 
         size_t offset = 0;
-        auto   read   = [&](void *dst, size_t n) {
+        auto read = [&](void *dst, size_t n) {
             std::memcpy(dst, data + offset, n);
             offset += n;
         };
@@ -67,53 +66,43 @@ namespace NNUE {
         return true;
 #else
         std::ifstream file(path, std::ios::binary);
-        if (!file)
-        {
+        if (!file) {
             std::cerr << "NNUE: failed to open " << path << "\n";
             return false;
         }
 
-        file.read(reinterpret_cast<char *>(g_network.feature_weights.data()),
-            INPUT_SIZE * HIDDEN_SIZE * sizeof(int16_t));
-        file.read(
-            reinterpret_cast<char *>(g_network.feature_bias.data()), HIDDEN_SIZE * sizeof(int16_t));
-        file.read(reinterpret_cast<char *>(g_network.output_weights.data()),
-            OUTPUT_BUCKETS * 2 * HIDDEN_SIZE * sizeof(int16_t));
-        file.read(reinterpret_cast<char *>(g_network.output_bias.data()),
-            OUTPUT_BUCKETS * sizeof(int16_t));
+        file.read(reinterpret_cast<char *>(g_network.feature_weights.data()), 
+                  INPUT_SIZE * HIDDEN_SIZE * sizeof(int16_t));
+        file.read(reinterpret_cast<char *>(g_network.feature_bias.data()), 
+                  HIDDEN_SIZE * sizeof(int16_t));
+        file.read(reinterpret_cast<char *>(g_network.output_weights.data()), 
+                  OUTPUT_BUCKETS * 2 * HIDDEN_SIZE * sizeof(int16_t));
+        file.read(reinterpret_cast<char *>(g_network.output_bias.data()), 
+                  OUTPUT_BUCKETS * sizeof(int16_t));
 
-        if (!file)
-        {
+        if (!file) {
             std::cerr << "NNUE: read error / truncated: " << path << "\n";
             return false;
         }
 
-        std::cout << "NNUE: loaded " << path << " (v2 arch, HS=" << HIDDEN_SIZE
-                  << " buckets=" << OUTPUT_BUCKETS << ")\n";
+        std::cout << "NNUE: loaded " << path << " (v2 arch, HS=" << HIDDEN_SIZE << ")\n";
         return true;
 #endif
     }
 
     void refresh(const Board &board, AccumulatorPair &pair) {
-        SIMD::simd_init_accumulator<HIDDEN_SIZE>(
-            pair.white_acc.vals.data(), g_network.feature_bias.data());
-        SIMD::simd_init_accumulator<HIDDEN_SIZE>(
-            pair.black_acc.vals.data(), g_network.feature_bias.data());
+        SIMD::simd_init_accumulator<HIDDEN_SIZE>(pair.white_acc.vals.data(), g_network.feature_bias.data());
+        SIMD::simd_init_accumulator<HIDDEN_SIZE>(pair.black_acc.vals.data(), g_network.feature_bias.data());
 
         const int16_t *fw = g_network.feature_weights.data();
 
-        for (PieceType pt = PAWN; pt <= KING; ++pt)
-        {
-            for (Color c = WHITE; c <= BLACK; ++c)
-            {
+        for (PieceType pt = PAWN; pt <= KING; ++pt) {
+            for (Color c = WHITE; c <= BLACK; ++c) {
                 Bitboard bb = board.pieces(pt, c);
-                while (bb)
-                {
+                while (bb) {
                     Square sq = Square(pop_lsb(bb));
-                    SIMD::simd_add_weights<HIDDEN_SIZE>(
-                        pair.white_acc.vals.data(), fw + white_idx(c, pt, sq) * HIDDEN_SIZE);
-                    SIMD::simd_add_weights<HIDDEN_SIZE>(
-                        pair.black_acc.vals.data(), fw + black_idx(c, pt, sq) * HIDDEN_SIZE);
+                    SIMD::simd_add_weights<HIDDEN_SIZE>(pair.white_acc.vals.data(), fw + white_idx(c, pt, sq) * HIDDEN_SIZE);
+                    SIMD::simd_add_weights<HIDDEN_SIZE>(pair.black_acc.vals.data(), fw + black_idx(c, pt, sq) * HIDDEN_SIZE);
                 }
             }
         }
@@ -121,22 +110,17 @@ namespace NNUE {
 
     void acc_add_piece(AccumulatorPair &pair, Color piece_color, PieceType pt, Square sq) {
         const int16_t *fw = g_network.feature_weights.data();
-        SIMD::simd_add_weights<HIDDEN_SIZE>(
-            pair.white_acc.vals.data(), fw + white_idx(piece_color, pt, sq) * HIDDEN_SIZE);
-        SIMD::simd_add_weights<HIDDEN_SIZE>(
-            pair.black_acc.vals.data(), fw + black_idx(piece_color, pt, sq) * HIDDEN_SIZE);
+        SIMD::simd_add_weights<HIDDEN_SIZE>(pair.white_acc.vals.data(), fw + white_idx(piece_color, pt, sq) * HIDDEN_SIZE);
+        SIMD::simd_add_weights<HIDDEN_SIZE>(pair.black_acc.vals.data(), fw + black_idx(piece_color, pt, sq) * HIDDEN_SIZE);
     }
 
     void acc_remove_piece(AccumulatorPair &pair, Color piece_color, PieceType pt, Square sq) {
         const int16_t *fw = g_network.feature_weights.data();
-        SIMD::simd_sub_weights<HIDDEN_SIZE>(
-            pair.white_acc.vals.data(), fw + white_idx(piece_color, pt, sq) * HIDDEN_SIZE);
-        SIMD::simd_sub_weights<HIDDEN_SIZE>(
-            pair.black_acc.vals.data(), fw + black_idx(piece_color, pt, sq) * HIDDEN_SIZE);
+        SIMD::simd_sub_weights<HIDDEN_SIZE>(pair.white_acc.vals.data(), fw + white_idx(piece_color, pt, sq) * HIDDEN_SIZE);
+        SIMD::simd_sub_weights<HIDDEN_SIZE>(pair.black_acc.vals.data(), fw + black_idx(piece_color, pt, sq) * HIDDEN_SIZE);
     }
 
-    void acc_move_piece(
-        AccumulatorPair &pair, Color piece_color, PieceType pt, Square from, Square to) {
+    void acc_move_piece(AccumulatorPair &pair, Color piece_color, PieceType pt, Square from, Square to) {
         const int16_t *fw = g_network.feature_weights.data();
         SIMD::simd_add_sub_weights<HIDDEN_SIZE>(pair.white_acc.vals.data(),
             fw + white_idx(piece_color, pt, to) * HIDDEN_SIZE,
@@ -147,41 +131,37 @@ namespace NNUE {
     }
 
     void push_move(AccumulatorStack &stack,
-        const Board                 &board,
-        Move                         m,
-        Color                        prev_stm,
-        Piece                        moved_piece,
-        Piece                        captured_piece) {
+                   [[maybe_unused]] const Board &board,
+                   Move m,
+                   Color prev_stm,
+                   Piece moved_piece,
+                   Piece captured_piece) {
         stack.push();
         AccumulatorPair &pair = stack.current();
 
-        Square    from = from_sq(m);
-        Square    to   = to_sq(m);
-        PieceType pt   = piece_type(moved_piece);
-        Color     us   = prev_stm;
+        Square from = from_sq(m);
+        Square to   = to_sq(m);
+        PieceType pt = piece_type(moved_piece);
+        Color us = prev_stm;
 
-        if (is_castling(m))
-        {
+        if (is_castling(m)) {
             CastlingRights cr = (us == WHITE) ? (to > from ? WHITE_OO : WHITE_OOO)
                                               : (to > from ? BLACK_OO : BLACK_OOO);
             acc_move_piece(pair, us, KING, from, CASTLING_DATA[cr].kingDest);
             acc_move_piece(pair, us, ROOK, CASTLING_DATA[cr].rookSrc, CASTLING_DATA[cr].rookDest);
         }
-        else if (is_en_passant(m))
-        {
+        else if (is_en_passant(m)) {
             Square capsq = (us == WHITE) ? Square(int(to) - 8) : Square(int(to) + 8);
             acc_move_piece(pair, us, PAWN, from, to);
             acc_remove_piece(pair, ~us, PAWN, capsq);
         }
-        else if (is_promotion(m))
-        {
+        else if (is_promotion(m)) {
             acc_remove_piece(pair, us, PAWN, from);
             if (captured_piece != NO_PIECE)
                 acc_remove_piece(pair, ~us, piece_type(captured_piece), to);
             acc_add_piece(pair, us, promo_piece(m), to);
         }
-        else
-        {
+        else {
             if (captured_piece != NO_PIECE)
                 acc_remove_piece(pair, ~us, piece_type(captured_piece), to);
             acc_move_piece(pair, us, pt, from, to);
@@ -193,15 +173,12 @@ namespace NNUE {
         const int   bucket = output_bucket(board);
 
         const int16_t *ow_base = g_network.output_weights.data() + bucket * 2 * HIDDEN_SIZE;
-        const int16_t *acc_stm
-            = (stm == WHITE) ? pair.white_acc.vals.data() : pair.black_acc.vals.data();
-        const int16_t *acc_nstm
-            = (stm == WHITE) ? pair.black_acc.vals.data() : pair.white_acc.vals.data();
+        const int16_t *acc_stm = (stm == WHITE) ? pair.white_acc.vals.data() : pair.black_acc.vals.data();
+        const int16_t *acc_nstm = (stm == WHITE) ? pair.black_acc.vals.data() : pair.white_acc.vals.data();
 
         int64_t output = 0;
         output += static_cast<int64_t>(SIMD::simd_screlu_forward<HIDDEN_SIZE>(acc_stm, ow_base));
-        output += static_cast<int64_t>(
-            SIMD::simd_screlu_forward<HIDDEN_SIZE>(acc_nstm, ow_base + HIDDEN_SIZE));
+        output += static_cast<int64_t>(SIMD::simd_screlu_forward<HIDDEN_SIZE>(acc_nstm, ow_base + HIDDEN_SIZE));
 
         output /= static_cast<int64_t>(QA);
         output += static_cast<int64_t>(g_network.output_bias[bucket]);
@@ -211,7 +188,7 @@ namespace NNUE {
         return static_cast<int>(output);
     }
 
-    int evaluate(const AccumulatorStack &stack, const Board &board, Color stm) {
+    int evaluate(const AccumulatorStack &stack, const Board &board, [[maybe_unused]] Color stm) {
         return evaluate(stack.current(), board);
     }
 
@@ -221,5 +198,5 @@ namespace NNUE {
         return evaluate(pair, board);
     }
 
-}  // namespace NNUE
-}  // namespace Catalyst
+} // namespace NNUE
+} // namespace Catalyst
