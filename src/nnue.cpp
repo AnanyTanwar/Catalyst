@@ -15,21 +15,18 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "nnue.h"
-
 #include <iostream>
-
 #ifndef NNUE_EMBEDDED
 #include <fstream>
 #endif
-
 #include "bitboard.h"
 #include "board.h"
 #include "simd.h"
 
 #ifdef NNUE_EMBEDDED
 extern "C" {
-extern const uint8_t _binary_catalyst_v1_nnue_start[];
-extern const uint8_t _binary_catalyst_v1_nnue_end[];
+extern const uint8_t _binary_catalyst_v2_nnue_start[];
+extern const uint8_t _binary_catalyst_v2_nnue_end[];
 }
 #endif
 
@@ -39,13 +36,14 @@ namespace NNUE {
     alignas(64) Network g_network;
 
     bool load([[maybe_unused]] const std::string &path) {
-#ifdef NNUE_EMBEDDED
-        const uint8_t *data = _binary_catalyst_v1_nnue_start;
-        const size_t   size
-            = static_cast<size_t>(_binary_catalyst_v1_nnue_end - _binary_catalyst_v1_nnue_start);
-
         constexpr size_t expected = INPUT_SIZE * HIDDEN_SIZE * sizeof(int16_t)
-            + HIDDEN_SIZE * sizeof(int16_t) + 2 * HIDDEN_SIZE * sizeof(int16_t) + sizeof(int16_t);
+            + HIDDEN_SIZE * sizeof(int16_t) + OUTPUT_BUCKETS * 2 * HIDDEN_SIZE * sizeof(int16_t)
+            + OUTPUT_BUCKETS * sizeof(int16_t);
+
+#ifdef NNUE_EMBEDDED
+        const uint8_t *data = _binary_catalyst_v2_nnue_start;
+        const size_t   size
+            = static_cast<size_t>(_binary_catalyst_v2_nnue_end - _binary_catalyst_v2_nnue_start);
 
         if (size < expected)
         {
@@ -62,12 +60,11 @@ namespace NNUE {
 
         read(g_network.feature_weights.data(), INPUT_SIZE * HIDDEN_SIZE * sizeof(int16_t));
         read(g_network.feature_bias.data(), HIDDEN_SIZE * sizeof(int16_t));
-        read(g_network.output_weights.data(), 2 * HIDDEN_SIZE * sizeof(int16_t));
-        read(&g_network.output_bias, sizeof(int16_t));
+        read(g_network.output_weights.data(), OUTPUT_BUCKETS * 2 * HIDDEN_SIZE * sizeof(int16_t));
+        read(g_network.output_bias.data(), OUTPUT_BUCKETS * sizeof(int16_t));
 
-        std::cout << "NNUE: loaded embedded net (" << size << " bytes)\n";
+        std::cout << "NNUE: loaded embedded net v2 (" << size << " bytes)\n";
         return true;
-
 #else
         std::ifstream file(path, std::ios::binary);
         if (!file)
@@ -81,8 +78,9 @@ namespace NNUE {
         file.read(
             reinterpret_cast<char *>(g_network.feature_bias.data()), HIDDEN_SIZE * sizeof(int16_t));
         file.read(reinterpret_cast<char *>(g_network.output_weights.data()),
-            2 * HIDDEN_SIZE * sizeof(int16_t));
-        file.read(reinterpret_cast<char *>(&g_network.output_bias), sizeof(int16_t));
+            OUTPUT_BUCKETS * 2 * HIDDEN_SIZE * sizeof(int16_t));
+        file.read(reinterpret_cast<char *>(g_network.output_bias.data()),
+            OUTPUT_BUCKETS * sizeof(int16_t));
 
         if (!file)
         {
@@ -90,7 +88,8 @@ namespace NNUE {
             return false;
         }
 
-        std::cout << "NNUE: loaded " << path << "\n";
+        std::cout << "NNUE: loaded " << path << " (v2 arch, HS=" << HIDDEN_SIZE
+                  << " buckets=" << OUTPUT_BUCKETS << ")\n";
         return true;
 #endif
     }
@@ -148,11 +147,11 @@ namespace NNUE {
     }
 
     void push_move(AccumulatorStack &stack,
-        const Board & /*board*/,
-        Move  m,
-        Color prev_stm,
-        Piece moved_piece,
-        Piece captured_piece) {
+        const Board                 &board,
+        Move                         m,
+        Color                        prev_stm,
+        Piece                        moved_piece,
+        Piece                        captured_piece) {
         stack.push();
         AccumulatorPair &pair = stack.current();
 
@@ -163,13 +162,10 @@ namespace NNUE {
 
         if (is_castling(m))
         {
-            CastlingRights cr    = (us == WHITE) ? (to > from ? WHITE_OO : WHITE_OOO)
-                                                 : (to > from ? BLACK_OO : BLACK_OOO);
-            Square         kto   = CASTLING_DATA[cr].kingDest;
-            Square         rfrom = CASTLING_DATA[cr].rookSrc;
-            Square         rto   = CASTLING_DATA[cr].rookDest;
-            acc_move_piece(pair, us, KING, from, kto);
-            acc_move_piece(pair, us, ROOK, rfrom, rto);
+            CastlingRights cr = (us == WHITE) ? (to > from ? WHITE_OO : WHITE_OOO)
+                                              : (to > from ? BLACK_OO : BLACK_OOO);
+            acc_move_piece(pair, us, KING, from, CASTLING_DATA[cr].kingDest);
+            acc_move_piece(pair, us, ROOK, CASTLING_DATA[cr].rookSrc, CASTLING_DATA[cr].rookDest);
         }
         else if (is_en_passant(m))
         {
@@ -179,11 +175,10 @@ namespace NNUE {
         }
         else if (is_promotion(m))
         {
-            PieceType promo = promo_piece(m);
             acc_remove_piece(pair, us, PAWN, from);
             if (captured_piece != NO_PIECE)
                 acc_remove_piece(pair, ~us, piece_type(captured_piece), to);
-            acc_add_piece(pair, us, promo, to);
+            acc_add_piece(pair, us, promo_piece(m), to);
         }
         else
         {
@@ -193,32 +188,37 @@ namespace NNUE {
         }
     }
 
-    int evaluate(const AccumulatorPair &pair) {
-        const int16_t *ow = g_network.output_weights.data();
+    int evaluate(const AccumulatorPair &pair, const Board &board) {
+        const Color stm    = board.side_to_move();
+        const int   bucket = output_bucket(board);
 
-        int64_t output = static_cast<int64_t>(
-            SIMD::simd_screlu_forward<HIDDEN_SIZE>(pair.white_acc.vals.data(), ow));
+        const int16_t *ow_base = g_network.output_weights.data() + bucket * 2 * HIDDEN_SIZE;
+        const int16_t *acc_stm
+            = (stm == WHITE) ? pair.white_acc.vals.data() : pair.black_acc.vals.data();
+        const int16_t *acc_nstm
+            = (stm == WHITE) ? pair.black_acc.vals.data() : pair.white_acc.vals.data();
+
+        int64_t output = 0;
+        output += static_cast<int64_t>(SIMD::simd_screlu_forward<HIDDEN_SIZE>(acc_stm, ow_base));
         output += static_cast<int64_t>(
-            SIMD::simd_screlu_forward<HIDDEN_SIZE>(pair.black_acc.vals.data(), ow + HIDDEN_SIZE));
+            SIMD::simd_screlu_forward<HIDDEN_SIZE>(acc_nstm, ow_base + HIDDEN_SIZE));
 
         output /= static_cast<int64_t>(QA);
-        output += static_cast<int64_t>(g_network.output_bias);
+        output += static_cast<int64_t>(g_network.output_bias[bucket]);
         output *= static_cast<int64_t>(SCALE);
         output /= static_cast<int64_t>(QA) * static_cast<int64_t>(QB);
 
         return static_cast<int>(output);
     }
 
-    int evaluate(const AccumulatorStack &stack, Color stm) {
-        int score = evaluate(stack.current());
-        return stm == WHITE ? score : -score;
+    int evaluate(const AccumulatorStack &stack, const Board &board, Color stm) {
+        return evaluate(stack.current(), board);
     }
 
     int evaluate(const Board &board) {
         AccumulatorPair pair;
         refresh(board, pair);
-        int score = evaluate(pair);
-        return board.side_to_move() == WHITE ? score : -score;
+        return evaluate(pair, board);
     }
 
 }  // namespace NNUE

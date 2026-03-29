@@ -1,9 +1,9 @@
 CXX     ?= g++
 CXX_WIN ?= x86_64-w64-mingw32-g++-posix
 EXE      = catalyst
-VERSION  = 1.0.0
+VERSION  = 2.0.0
 
-NNUE_FILE = catalyst-v1.nnue
+NNUE_FILE = catalyst-v2.nnue
 NNUE_OBJ  = build/nnue_embed.o
 NNUE_DL_URL = https://github.com/AnanyTanwar/CatalystNet/releases/latest/download/$(NNUE_FILE)
 

@@ -13,13 +13,13 @@
 
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 #pragma once
 
 #include <array>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <algorithm>
 
 #include "board.h"
 #include "simd.h"
@@ -28,29 +28,20 @@
 namespace Catalyst {
 namespace NNUE {
 
-    // Architecture: (768 -> HIDDEN_SIZE)x2 -> 1
-    inline constexpr int HIDDEN_SIZE    = 64;
+    inline constexpr int HIDDEN_SIZE    = 256;
     inline constexpr int INPUT_SIZE     = 768;
+    inline constexpr int OUTPUT_BUCKETS = 8;
     inline constexpr int QA             = 255;
     inline constexpr int QB             = 64;
     inline constexpr int SCALE          = 400;
     inline constexpr int ACC_STACK_SIZE = MAX_PLY + 8;
+    inline constexpr int BUCKET_DIVISOR = 4;
 
     struct alignas(64) Accumulator {
         std::array<int16_t, HIDDEN_SIZE> vals;
 
         void init(const int16_t *bias) {
             std::memcpy(vals.data(), bias, HIDDEN_SIZE * sizeof(int16_t));
-        }
-        void add(int idx, const int16_t *weights) {
-            const int16_t *col = weights + idx * HIDDEN_SIZE;
-            for (int i = 0; i < HIDDEN_SIZE; ++i)
-                vals[i] += col[i];
-        }
-        void remove(int idx, const int16_t *weights) {
-            const int16_t *col = weights + idx * HIDDEN_SIZE;
-            for (int i = 0; i < HIDDEN_SIZE; ++i)
-                vals[i] -= col[i];
         }
         void copy_from(const Accumulator &o) {
             std::memcpy(vals.data(), o.vals.data(), HIDDEN_SIZE * sizeof(int16_t));
@@ -77,30 +68,34 @@ namespace NNUE {
     };
 
     struct alignas(64) Network {
-        std::array<int16_t, INPUT_SIZE * HIDDEN_SIZE> feature_weights;
-        std::array<int16_t, HIDDEN_SIZE>              feature_bias;
-        std::array<int16_t, 2 * HIDDEN_SIZE>          output_weights;
-        int16_t                                       output_bias;
+        std::array<int16_t, INPUT_SIZE * HIDDEN_SIZE>         feature_weights;
+        std::array<int16_t, HIDDEN_SIZE>                      feature_bias;
+        std::array<int16_t, OUTPUT_BUCKETS * 2 * HIDDEN_SIZE> output_weights;
+        std::array<int16_t, OUTPUT_BUCKETS>                   output_bias;
     };
 
     extern Network g_network;
 
     bool load(const std::string &path);
 
-    [[nodiscard]] inline int white_idx(Color piece_color, PieceType pt, Square sq) {
-        return ((piece_color == BLACK) ? 384 : 0) + (int(pt) - 1) * 64 + int(sq);
+    [[nodiscard]] inline int output_bucket(const Board &board) {
+        int pieces = BitCount(board.pieces()) - 2;
+        return std::clamp(pieces / BUCKET_DIVISOR, 0, OUTPUT_BUCKETS - 1);
     }
 
-    [[nodiscard]] inline int black_idx(Color piece_color, PieceType pt, Square sq) {
-        return ((piece_color == WHITE) ? 384 : 0) + (int(pt) - 1) * 64 + (int(sq) ^ 56);
+    [[nodiscard]] inline int white_idx(Color pc_color, PieceType pt, Square sq) {
+        return (pc_color == BLACK ? 384 : 0) + (int(pt) - 1) * 64 + int(sq);
+    }
+
+    [[nodiscard]] inline int black_idx(Color pc_color, PieceType pt, Square sq) {
+        Square sq_flipped = Square(int(sq) ^ 56);
+        return (pc_color == WHITE ? 384 : 0) + (int(pt) - 1) * 64 + int(sq_flipped);
     }
 
     void refresh(const Board &board, AccumulatorPair &pair);
-
-    void acc_add_piece(AccumulatorPair &pair, Color piece_color, PieceType pt, Square sq);
-    void acc_remove_piece(AccumulatorPair &pair, Color piece_color, PieceType pt, Square sq);
-    void acc_move_piece(
-        AccumulatorPair &pair, Color piece_color, PieceType pt, Square from, Square to);
+    void acc_add_piece(AccumulatorPair &pair, Color pc, PieceType pt, Square sq);
+    void acc_remove_piece(AccumulatorPair &pair, Color pc, PieceType pt, Square sq);
+    void acc_move_piece(AccumulatorPair &pair, Color pc, PieceType pt, Square from, Square to);
 
     void push_move(AccumulatorStack &stack,
         const Board                 &board,
@@ -109,8 +104,8 @@ namespace NNUE {
         Piece                        moved_piece,
         Piece                        captured_piece);
 
-    [[nodiscard]] int evaluate(const AccumulatorPair &pair);
-    [[nodiscard]] int evaluate(const AccumulatorStack &stack, Color stm);
+    [[nodiscard]] int evaluate(const AccumulatorPair &pair, const Board &board);
+    [[nodiscard]] int evaluate(const AccumulatorStack &stack, const Board &board, Color stm);
     [[nodiscard]] int evaluate(const Board &board);
 
 }  // namespace NNUE

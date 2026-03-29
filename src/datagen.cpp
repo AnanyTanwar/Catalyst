@@ -166,7 +166,7 @@ static void datagen_thread(const std::string &output_path, int nodes_per_move,
       int score = search->last_score();
 
       if (!board.in_check() && std::abs(score) < 1000)
-        positions.push_back({board.get_fen(), score});
+        positions.push_back({board.get_fen(), board.side_to_move() == WHITE ? score : -score});
 
       if (std::abs(score) >= 1000) {
         result = score > 0 ? (board.side_to_move() == WHITE ? 2 : 0)

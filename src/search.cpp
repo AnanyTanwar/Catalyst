@@ -240,7 +240,7 @@ bool Search::is_shuffling(Move m, int ply) const {
 // Evaluation with correction history and fifty-move scaling
 // ---------------------------------------------------------------------------
 int Search::adjusted_eval(const Board &board, int ply) {
-  int raw = NNUE::evaluate(accStack_, board.side_to_move());
+  int raw = NNUE::evaluate(accStack_, board, board.side_to_move());
   Color us = board.side_to_move();
 
   int corr = 0;
@@ -588,7 +588,7 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
   if (!inCheck) {
     rawEval = (ttHit && ttEval != 0)
                   ? ttEval
-                  : NNUE::evaluate(accStack_, board.side_to_move());
+                  : NNUE::evaluate(accStack_, board, board.side_to_move());
     staticEval = adjusted_eval(board, ply);
     cur->complexity = std::abs(staticEval - rawEval);
 
