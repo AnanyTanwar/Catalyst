@@ -67,10 +67,10 @@
 
 ### Evaluation
 - **NNUE** 
-  - Architecture: `(768 → 64)×2 → 1`
+  - Architecture: `(768 → 256)×2 → 8` (8 material-count output buckets)
   - Incremental accumulator updates
   - SIMD-accelerated inference (SSE4.1 / AVX2 / AVX-512)
-  - Embedded network (`catalyst-v1.nnue`) — no external file needed
+  - Embedded network (`catalyst-v2.nnue`) 
   - SCReLU activation
   - Correction history applied on top of raw NNUE score
 
