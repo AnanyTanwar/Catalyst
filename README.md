@@ -1,6 +1,12 @@
 # Catalyst
 
-A UCI-compliant chess engine written in C++20, featuring NNUE evaluation and advanced search techniques.
+> A UCI-compliant chess engine written in C++20, featuring NNUE evaluation and advanced search.
+
+Catalyst uses a `(768 → 256)×2 → 8` neural network with incremental accumulator updates and SIMD-accelerated inference (SSE4.1 / AVX2 / AVX-512), combined with a robust search implementation including PVS, Lazy SMP, and an extensive suite of pruning, extension, and reduction techniques.
+
+[![License][license-badge]][license-link]
+[![GitHub release (latest by date)][release-badge]][release-link]
+[![Commits since latest release][commits-badge]][commits-link]
 
 ---
 
@@ -52,11 +58,11 @@ A UCI-compliant chess engine written in C++20, featuring NNUE evaluation and adv
 - Lazy SMP (multi-threaded search)
 
 ### Evaluation
-- **NNUE** 
+- **NNUE**
   - Architecture: `(768 → 256)×2 → 8` (8 material-count output buckets)
   - Incremental accumulator updates
   - SIMD-accelerated inference (SSE4.1 / AVX2 / AVX-512)
-  - Embedded network (`catalyst-v2.nnue`) 
+  - Embedded network (`catalyst-v2.nnue`)
   - SCReLU activation
   - Correction history applied on top of raw NNUE score
 
@@ -72,25 +78,25 @@ A UCI-compliant chess engine written in C++20, featuring NNUE evaluation and adv
 
 ## UCI Options
 
-| Name            |  Type   | Default |     Valid values     | Description                                         |
-|:----------------|:-------:|:-------:|:--------------------:|:----------------------------------------------------|
-| `Hash`          | integer |   64    |     [1, 65536]       | Transposition table size in MiB.                    |
-| `Clear Hash`    | button  |   N/A   |        N/A           | Clears the transposition table.                     |
-| `Threads`       | integer |    1    |  [1, hardware max]   | Number of search threads (Lazy SMP).                |
-| `Move Overhead` | integer |   50    |     [0, 5000]        | Time overhead per move in ms.                       |
-| `Ponder`        |  check  |  false  |   `true`, `false`    | Enable pondering.                                   |
-| `EvalFile`      | string  | `catalyst.nnue` | any path  | External NNUE file to load (overrides embedded).    |
+| Name | Type | Default | Valid values | Description |
+|:---|:---:|:---:|:---:|:---|
+| `Hash` | integer | 64 | [1, 65536] | Transposition table size in MiB. |
+| `Clear Hash` | button | N/A | N/A | Clears the transposition table. |
+| `Threads` | integer | 1 | [1, hardware max] | Number of search threads (Lazy SMP). |
+| `Move Overhead` | integer | 50 | [0, 5000] | Time overhead per move in ms. |
+| `Ponder` | check | false | `true`, `false` | Enable pondering. |
+| `EvalFile` | string | `catalyst.nnue` | any path | External NNUE file to load (overrides embedded). |
 
 ---
 
 ## Non-standard Commands
 
-| Command              | Description                                                    |
-|:---------------------|:---------------------------------------------------------------|
-| `d`                  | Display the current board position.                            |
-| `eval`               | Print NNUE evaluation for the current position.                |
-| `perft <depth>`      | Run a perft test from the current position.                    |
-| `bench [depth <n>] [threads <n>]` | Run a benchmark. Default depth: 13.             |
+| Command | Description |
+|:---|:---|
+| `d` | Display the current board position. |
+| `eval` | Print NNUE evaluation for the current position. |
+| `perft <depth>` | Run a perft test from the current position. |
+| `bench [depth <n>] [threads <n>]` | Run a benchmark. Default depth: 13. |
 | `datagen [output <file>] [threads <n>] [nodes <n>] [games <n>] [book <file>]` | Generate training data. |
 
 ---
@@ -99,13 +105,13 @@ A UCI-compliant chess engine written in C++20, featuring NNUE evaluation and adv
 
 Choose the binary that matches your CPU's highest supported instruction set:
 
-| Binary              | Requirements                                      | Notes                              |
-|:--------------------|:--------------------------------------------------|:-----------------------------------|
-| `avx512vnni`        | AVX-512 + VNNI (Cascade Lake, Zen 4+)             | Fastest — use if supported         |
-| `avx512`            | AVX-512 + BMI2 (Ice Lake, Rocket Lake+)           |                                    |
-| `bmi2`              | AVX2 + BMI2 (Intel Haswell+, AMD Zen 3+)          | Use BMI2 on Intel / Zen 3+         |
-| `avx2`              | AVX2 (Broadwell+, AMD Excavator+)                 | For AMD Zen 1/2 or older Intel     |
-| `x86-64`            | x86-64 + POPCNT                                   | Widest compatibility, slowest      |
+| Binary | Requirements | Notes |
+|:---|:---|:---|
+| `avx512vnni` | AVX-512 + VNNI (Cascade Lake, Zen 4+) | Fastest — use if supported |
+| `avx512` | AVX-512 + BMI2 (Ice Lake, Rocket Lake+) | |
+| `bmi2` | AVX2 + BMI2 (Intel Haswell+, AMD Zen 3+) | Use BMI2 on Intel / Zen 3+ |
+| `avx2` | AVX2 (Broadwell+, AMD Excavator+) | For AMD Zen 1/2 or older Intel |
+| `x86-64` | x86-64 + POPCNT | Widest compatibility, slowest |
 
 > **AMD Zen 1 / Zen 2 users**: use the `avx2` build even if your CPU supports BMI2. These CPUs implement `pext`/`pdep` in microcode, making them very slow for Catalyst's purposes.
 
@@ -124,9 +130,9 @@ cd Catalyst
 make ARCH=native
 
 # Build a specific architecture
-make avx2
-make bmi2
-make avx512
+make linux-avx2
+make linux-bmi2
+make linux-avx512
 
 # Build all Linux release binaries
 make release-linux
@@ -161,7 +167,7 @@ Catalyst is free software distributed under the [GNU General Public License v3.0
 
 ## Credits
 
-**Special thanks to the Stockfish Discord community for their invaluable help with debugging, NNUE guidance, and overall support during Catalyst’s development.**
+**Special thanks to the Stockfish Discord community for their invaluable help with debugging, NNUE guidance, and overall support during Catalyst's development.**
 
 Catalyst would not exist without the broader chess programming community. In no particular order, these engines and projects were notable sources of ideas and inspiration:
 
