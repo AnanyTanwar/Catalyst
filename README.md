@@ -186,6 +186,7 @@ Catalyst would not exist without the broader chess programming community. In no 
 - [Stockfish](https://github.com/official-stockfish/Stockfish)
 - [Stormphrax](https://github.com/Ciekce/Stormphrax)
 - [Integral](https://github.com/aronpetko/integral)
+- [Obsidian](https://github.com/gab8192/Obsidian)
 - [bullet](https://github.com/jw1912/bullet) — NNUE trainer
 
 ---
