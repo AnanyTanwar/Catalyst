@@ -16,7 +16,7 @@ Catalyst has not yet been rated by CCRL. The following ratings are based on inte
 
 | Version | Estimated Elo | Test Conditions | Notes |
 |--------|--------------|----------------|------|
-| v1.0.0 | ~2800–2900 | Self-play / local testing | Initial NNUE implementation |
+| v1.0.0 | 2900 | Self-play / local testing | Initial NNUE implementation |
 | v2.0.0 | 3058 | 30+0.3 · 200 games | +230 Elo vs v1, new NNUE + search improvements |
 
 > Ratings are approximate and may vary depending on hardware, time control, and testing methodology.  
