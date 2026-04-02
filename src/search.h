@@ -260,10 +260,6 @@ private:
   bool opponent_has_winning_capture(const Board &board) const;
   bool is_shuffling(Move m, int ply) const;
 
-  Key non_pawn_key(const Board &board) const {
-    return board.key() * 0x9e3779b97f4a7c15ULL;
-  }
-
   int draw_score() const { return 4 - int(info_.nodes & 3); }
 
   static int ilerp(int a, int b, double t) {
