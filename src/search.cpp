@@ -244,11 +244,11 @@ int Search::adjusted_eval(const Board &board, int ply) {
   Color us = board.side_to_move();
 
   int corr = 0;
-  corr += corrMain_[us][board.key() % CORR_SIZE];
+  corr += corrMain_[us][(board.non_pawn_key(WHITE) ^ board.non_pawn_key(BLACK) * 2) % CORR_SIZE];
   corr += corrPawn_[us][board.pawn_key() % PAWN_CORR_SIZE];
-  Key npk = non_pawn_key(board);
-  corr += corrNonPawnWhite_[us][npk % NONPAWN_CORR_SIZE];
-  corr += corrNonPawnBlack_[us][npk % NONPAWN_CORR_SIZE];
+  
+  corr += corrNonPawnWhite_[us][board.non_pawn_key(WHITE) % NONPAWN_CORR_SIZE];
+  corr += corrNonPawnBlack_[us][board.non_pawn_key(BLACK) % NONPAWN_CORR_SIZE];
 
   const SearchStack *cur = ss(ply);
   if (ply >= 1 && (cur - 1)->move != MOVE_NONE &&
@@ -271,7 +271,7 @@ int Search::adjusted_eval(const Board &board, int ply) {
 
 void Search::update_correction(const Board &board, int ply, int staticEval,
                                int searchScore, int depth, bool bestIsCap) {
-  if (bestIsCap || depth < 4 || depth > 24 || staticEval == SCORE_NONE)
+  if (bestIsCap || depth < 2 || staticEval == SCORE_NONE)
     return;
   if (is_mate_score(searchScore) || is_mate_score(staticEval))
     return;
@@ -282,11 +282,11 @@ void Search::update_correction(const Board &board, int ply, int staticEval,
     e += bonus - e * std::abs(bonus) / (32 * CORR_SCALE);
   };
 
-  upd(corrMain_[us][board.key() % CORR_SIZE]);
+  upd(corrMain_[us][(board.non_pawn_key(WHITE) ^ board.non_pawn_key(BLACK) * 2) % CORR_SIZE]);
   upd(corrPawn_[us][board.pawn_key() % PAWN_CORR_SIZE]);
-  Key npk = non_pawn_key(board);
-  upd(corrNonPawnWhite_[us][npk % NONPAWN_CORR_SIZE]);
-  upd(corrNonPawnBlack_[us][npk % NONPAWN_CORR_SIZE]);
+  
+  upd(corrNonPawnWhite_[us][board.non_pawn_key(WHITE) % NONPAWN_CORR_SIZE]);
+  upd(corrNonPawnBlack_[us][board.non_pawn_key(BLACK) % NONPAWN_CORR_SIZE]);
 
   SearchStack *cur = ss(ply);
   if ((cur - 1)->move != MOVE_NONE) {
@@ -465,8 +465,7 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply) {
         (standPat != SCORE_NONE && std::abs(standPat) < SCORE_INFINITE)
             ? standPat
             : 0;
-    tt.store(board.key(), score_to_tt(bestScore, ply), -1, flag, MOVE_NONE,
-             storeEval);
+    tt.store(board.key(), score_to_tt(bestScore, ply), -1, flag, MOVE_NONE, storeEval, false);
   }
 
   return bestScore;
@@ -593,7 +592,7 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
     cur->complexity = std::abs(staticEval - rawEval);
 
     if (!ttHit && excludedMove == MOVE_NONE && depth >= 4)
-      tt.store(board.key(), 0, 0, TT_NONE, MOVE_NONE, rawEval);
+        tt.store(board.key(), 0, 0, TT_NONE, MOVE_NONE, rawEval, false);
 
     if (ttHit && ttFlag != TT_NONE) {
       if (ttFlag == TT_LOWER && ttScore > staticEval)
@@ -758,9 +757,14 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
         return 0;
 
       if (pcScore >= pcBeta) {
-        tt.store(board.key(), score_to_tt(pcScore, ply), depth - 3, TT_LOWER, m,
-                 rawEval != SCORE_NONE ? rawEval : 0);
-        return pcScore;
+          tt.store(board.key(),
+              score_to_tt(pcScore, ply),
+              depth - 3,
+              TT_LOWER,
+              m,
+              rawEval != SCORE_NONE ? rawEval : 0,
+              false);
+          return pcScore;
       }
     }
   }
@@ -910,8 +914,13 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
           return mcScore;
       } else if (singBeta >= beta) {
         int mcScore = std::min(singBeta, SCORE_MATE_IN_MAX_PLY - 1);
-        tt.store(board.key(), score_to_tt(mcScore, ply), depth / 2, TT_LOWER, m,
-                 rawEval != SCORE_NONE ? rawEval : 0);
+        tt.store(board.key(),
+            score_to_tt(mcScore, ply),
+            depth / 2,
+            TT_LOWER,
+            m,
+            rawEval != SCORE_NONE ? rawEval : 0,
+            false);
         return mcScore;
       } else if (ttScore >= beta) {
         ext = -1;
@@ -1120,8 +1129,7 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
     int storeEval =
         (rawEval != SCORE_NONE && std::abs(rawEval) < SCORE_INFINITE) ? rawEval
                                                                       : 0;
-    tt.store(board.key(), score_to_tt(storeScore, ply), depth, flag, bestMove,
-             storeEval);
+    tt.store(board.key(), score_to_tt(storeScore, ply), depth, flag, bestMove, storeEval, isPV);
   }
 
   return bestScore;
