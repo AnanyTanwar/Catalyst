@@ -246,11 +246,13 @@ void Board::move_piece(Square from, Square to) {
   board[from] = NO_PIECE;
 }
 
-void Board::set_state(StateInfo* si) {
-  si->key = compute_key<false>();
-  si->pawnKey = compute_pawn_key();
-  si->checkersBB = attackers_to(king_square(sideToMove)) & pieces(~sideToMove);
-  update_blockers(si);
+void Board::set_state(StateInfo *si) {
+    si->key               = compute_key<false>();
+    si->pawnKey           = compute_pawn_key();
+    si->nonPawnKey[WHITE] = compute_non_pawn_key(WHITE);
+    si->nonPawnKey[BLACK] = compute_non_pawn_key(BLACK);
+    si->checkersBB        = attackers_to(king_square(sideToMove)) & pieces(~sideToMove);
+    update_blockers(si);
 }
 
 void Board::update_state(StateInfo* si) {
@@ -299,6 +301,20 @@ Key Board::compute_pawn_key() const {
     k ^= Zobrist::psq[piece_on(sq)][sq];
   }
   return k;
+}
+
+Key Board::compute_non_pawn_key(Color c) const {
+    Key k = 0;
+    for (PieceType pt : { KNIGHT, BISHOP, ROOK, QUEEN, KING })
+    {
+        Bitboard bb = pieces(pt, c);
+        while (bb)
+        {
+            Square sq = pop_lsb(bb);
+            k ^= Zobrist::psq[makePiece(c, pt)][sq];
+        }
+    }
+    return k;
 }
 
 template <bool AfterMove> Key Board::compute_key() const {
@@ -365,9 +381,11 @@ void Board::make_move(Move m, StateInfo& newSt) {
 
     move_piece(from, kto);
     st->key ^= Zobrist::psq[pc][from] ^ Zobrist::psq[pc][kto];
+    st->nonPawnKey[us] ^= Zobrist::psq[pc][from] ^ Zobrist::psq[pc][kto];
     move_piece(rfrom, rto);
     st->key ^= Zobrist::psq[rook][rfrom] ^ Zobrist::psq[rook][rto];
 
+    st->nonPawnKey[us] ^= Zobrist::psq[rook][rfrom] ^ Zobrist::psq[rook][rto];
     st->capturedPiece = NO_PIECE;
     st->rule50++;
 
@@ -406,10 +424,13 @@ void Board::make_move(Move m, StateInfo& newSt) {
     Piece promoPiece = makePiece(us, promo_piece(m));
     put_piece(promoPiece, to);
     st->key ^= Zobrist::psq[promoPiece][to];
+    st->nonPawnKey[us] ^= Zobrist::psq[promoPiece][to];
+    if (st->capturedPiece != NO_PIECE && piece_type(st->capturedPiece) != PAWN)
+        st->nonPawnKey[them] ^= Zobrist::psq[st->capturedPiece][to];
 
-    st->rule50 = 0;
+    st->rule50  = 0;
     st->pawnKey = compute_pawn_key();
-
+    
   } else {
     if (piece_on(to) != NO_PIECE) {
       st->capturedPiece = piece_on(to);
@@ -426,6 +447,11 @@ void Board::make_move(Move m, StateInfo& newSt) {
 
     move_piece(from, to);
     st->key ^= Zobrist::psq[pc][from] ^ Zobrist::psq[pc][to];
+
+    if (pt != PAWN)
+        st->nonPawnKey[us] ^= Zobrist::psq[pc][from] ^ Zobrist::psq[pc][to];  
+    if (st->capturedPiece != NO_PIECE && piece_type(st->capturedPiece) != PAWN)
+        st->nonPawnKey[them] ^= Zobrist::psq[st->capturedPiece][to];  
 
     if (pt == PAWN) {
       st->rule50 = 0;
