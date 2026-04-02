@@ -34,6 +34,7 @@ void init();
 struct alignas(64) StateInfo {
   Key key;
   Key pawnKey;
+  Key nonPawnKey[COLOR_NB];
   int castlingRights;
   Square epSquare;
   int rule50;
@@ -99,6 +100,7 @@ public:
   [[nodiscard]] FORCE_INLINE int      game_ply() const        { return gamePly; }
   [[nodiscard]] FORCE_INLINE Key      key() const             { return st->key; }
   [[nodiscard]] FORCE_INLINE Key      pawn_key() const        { return st->pawnKey; }
+  [[nodiscard]] FORCE_INLINE Key non_pawn_key(Color c) const { return st->nonPawnKey[c]; }
   [[nodiscard]] FORCE_INLINE bool     can_castle(CastlingRights cr) const { return (st->castlingRights & cr) != 0; }
 
   [[nodiscard]] FORCE_INLINE Bitboard checkers() const  { return st->checkersBB; }
@@ -164,6 +166,7 @@ private:
   void update_state(StateInfo* si);
   void update_blockers(StateInfo* si);
   Key compute_pawn_key() const;
+  Key compute_non_pawn_key(Color c) const;
 
   template <bool AfterMove> Key compute_key() const;
 };
