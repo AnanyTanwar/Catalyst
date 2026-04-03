@@ -30,7 +30,7 @@ namespace Catalyst {
 
 // Engine Info
 inline constexpr std::string_view ENGINE_NAME = "Catalyst";
-inline constexpr std::string_view ENGINE_VERSION = "v2.1.0";
+inline constexpr std::string_view ENGINE_VERSION = "v2.2.0";
 inline constexpr std::string_view ENGINE_AUTHOR = "Anany Tanwar";
 
 // Type Aliases
