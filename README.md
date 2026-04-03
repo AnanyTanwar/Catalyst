@@ -14,13 +14,17 @@ Catalyst uses a `(768 → 256)×2 → 8` neural network with incremental accumul
 
 Catalyst has not yet been rated by CCRL. The following ratings are based on internal testing and should be considered approximate.
 
-| Version | Estimated Elo | Test Conditions | Notes |
-|--------|--------------|----------------|------|
-| v1.0.0 | 2900 | Self-play / local testing | Initial NNUE implementation |
-| v2.0.0 | 3058 | 30+0.3 · 200 games | +230 Elo vs v1, new NNUE + search improvements |
+| Version | Estimated Elo | Notes |
+|:--------|:-------------:|:------|
+| v1.0.0  | ~2900         | Initial NNUE implementation |
+| v2.0.0  | ~3058         | +158 Elo vs v1 — new NNUE architecture, major search improvements |
+| v2.1.0  | ~3130         | +72 Elo vs v2.0 — TT rewrite: 16-byte entries, `uint128` index, huge page support |
+| v2.2.0  | ~3170         | +40 Elo vs v2.1 — threat-based move scoring, dynamic SEE thresholds |
 
-> Ratings are approximate and may vary depending on hardware, time control, and testing methodology.  
-> Official ratings will be added once Catalyst is listed on CCRL.
+> Ratings are approximate and based on self-play at 10+0.1. They may vary depending on hardware, time control, and testing methodology.  
+> Official CCRL ratings will be added once Catalyst is submitted.
+
+---
 
 ## Features
 
@@ -28,7 +32,7 @@ Catalyst has not yet been rated by CCRL. The following ratings are based on inte
 - Principal Variation Search (PVS) with iterative deepening
 - Quiescence search
 - Aspiration windows
-- Transposition table with aging
+- Transposition table with aging, rule50 counter, and huge page support
 - **Pruning**
   - Reverse futility pruning
   - Null move pruning with verification
@@ -50,13 +54,15 @@ Catalyst has not yet been rated by CCRL. The following ratings are based on inte
   - TT move
   - Staged move picker (good captures → killers → countermove → quiets → bad captures)
   - MVV-LVA for captures
+  - Threat-based quiet move scoring (escape bonus / step-in penalty)
+  - Dynamic SEE threshold for good captures
+  - Bad captures ordered by SEE loss (least-losing first)
   - Killer move heuristic (2 per ply)
   - Countermove heuristic
   - Butterfly history
   - Capture history
   - Pawn history
   - 1-ply, 2-ply, and 4-ply continuation history
-  - SEE move ordering
 - **History**
   - Butterfly history
   - Capture history
@@ -91,9 +97,9 @@ Catalyst has not yet been rated by CCRL. The following ratings are based on inte
 ## UCI Options
 
 | Name | Type | Default | Valid values | Description |
-|:---|:---:|:---:|:---:|:---|
+|:-----|:----:|:-------:|:------------:|:------------|
 | `Hash` | integer | 64 | [1, 65536] | Transposition table size in MiB. |
-| `Clear Hash` | button | N/A | N/A | Clears the transposition table. |
+| `Clear Hash` | button | — | — | Clears the transposition table. |
 | `Threads` | integer | 1 | [1, hardware max] | Number of search threads (Lazy SMP). |
 | `Move Overhead` | integer | 50 | [0, 5000] | Time overhead per move in ms. |
 | `Ponder` | check | false | `true`, `false` | Enable pondering. |
@@ -104,7 +110,7 @@ Catalyst has not yet been rated by CCRL. The following ratings are based on inte
 ## Non-standard Commands
 
 | Command | Description |
-|:---|:---|
+|:--------|:------------|
 | `d` | Display the current board position. |
 | `eval` | Print NNUE evaluation for the current position. |
 | `perft <depth>` | Run a perft test from the current position. |
@@ -118,11 +124,11 @@ Catalyst has not yet been rated by CCRL. The following ratings are based on inte
 Choose the binary that matches your CPU's highest supported instruction set:
 
 | Binary | Requirements | Notes |
-|:---|:---|:---|
+|:-------|:-------------|:------|
 | `avx512vnni` | AVX-512 + VNNI (Cascade Lake, Zen 4+) | Fastest — use if supported |
 | `avx512` | AVX-512 + BMI2 (Ice Lake, Rocket Lake+) | |
-| `bmi2` | AVX2 + BMI2 (Intel Haswell+, AMD Zen 3+) | Use BMI2 on Intel / Zen 3+ |
-| `avx2` | AVX2 (Broadwell+, AMD Excavator+) | For AMD Zen 1/2 or older Intel |
+| `bmi2` | AVX2 + BMI2 (Intel Haswell+, AMD Zen 3+) | Recommended for Intel Haswell+ and AMD Zen 3+ |
+| `avx2` | AVX2 (Broadwell+, AMD Excavator+) | Use for AMD Zen 1/2 or older Intel |
 | `x86-64` | x86-64 + POPCNT | Widest compatibility, slowest |
 
 > **AMD Zen 1 / Zen 2 users**: use the `avx2` build even if your CPU supports BMI2. These CPUs implement `pext`/`pdep` in microcode, making them very slow for Catalyst's purposes.
@@ -184,7 +190,8 @@ Catalyst is free software distributed under the [GNU General Public License v3.0
 Catalyst would not exist without the broader chess programming community. In no particular order, these engines and projects were notable sources of ideas and inspiration:
 
 - [Stockfish](https://github.com/official-stockfish/Stockfish)
-- [Stormphrax](https://github.com/Ciekce/Stormphrax)
+- [Stormphrax](https://github.com/Ciekce/Stormphrax) 
+- [Alexandria](https://github.com/PGG106/Alexandria)
 - [Integral](https://github.com/aronpetko/integral)
 - [Obsidian](https://github.com/gab8192/Obsidian)
 - [bullet](https://github.com/jw1912/bullet) — NNUE trainer
