@@ -168,8 +168,8 @@ void Search::update_capture_histories(const Board & /*board*/, Color us,
                                       PieceType *triedCaptPts, int triedCount) {
   int bonus = stat_bonus(histDepth);
   int malus = -stat_malus(histDepth);
-  gravity(captureHistory_[us][bestPt][to_sq(bestMove)][bestCaptPt], bonus,
-          HISTORY_MAX);
+  if (bestMove != MOVE_NONE)
+      gravity(captureHistory_[us][bestPt][to_sq(bestMove)][bestCaptPt], bonus, HISTORY_MAX);
   for (int i = 0; i < triedCount; ++i) {
     if (tried[i] == bestMove)
       continue;
@@ -465,7 +465,14 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply) {
         (standPat != SCORE_NONE && std::abs(standPat) < SCORE_INFINITE)
             ? standPat
             : 0;
-    tt.store(board.key(), score_to_tt(bestScore, ply), -1, flag, MOVE_NONE, storeEval, false);
+    tt.store(board.key(),
+        score_to_tt(bestScore, ply),
+        -1,
+        flag,
+        MOVE_NONE,
+        storeEval,
+        board.rule50_count(),
+        false);
   }
 
   return bestScore;
@@ -574,7 +581,20 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
         return ttScore;
       }
       if (ttFlag == TT_UPPER && ttScore <= alpha)
-        return ttScore;
+      {
+          if (ttMove != MOVE_NONE && !board.is_capture_or_promotion(ttMove))
+          {
+              int       malus = std::min(STAT_MALUS_MULT * depth + STAT_MALUS_BASE, STAT_MALUS_MAX);
+              Color     us    = board.side_to_move();
+              PieceType ttPt  = piece_type(board.piece_on(from_sq(ttMove)));
+              gravity(history_[us][from_sq(ttMove)][to_sq(ttMove)], -malus, HISTORY_MAX);
+              int phIdx = pawn_history_index(board.pawn_key());
+              gravity(pawnHistory_[phIdx][ttPt][to_sq(ttMove)], -malus / 2, HISTORY_MAX);
+              if ((cur - 1)->contHistEntry)
+                  gravity((*(cur - 1)->contHistEntry)[ttPt][to_sq(ttMove)], -malus, HISTORY_MAX);
+          }
+          return ttScore;
+      }
     }
   }
 
@@ -592,7 +612,7 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
     cur->complexity = std::abs(staticEval - rawEval);
 
     if (!ttHit && excludedMove == MOVE_NONE && depth >= 4)
-        tt.store(board.key(), 0, 0, TT_NONE, MOVE_NONE, rawEval, false);
+        tt.store(board.key(), 0, 0, TT_NONE, MOVE_NONE, rawEval, board.rule50_count(), false);
 
     if (ttHit && ttFlag != TT_NONE) {
       if (ttFlag == TT_LOWER && ttScore > staticEval)
@@ -607,11 +627,14 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
     // Eval history update
     if (ply >= 1 && (cur - 1)->move != MOVE_NONE && !(cur - 1)->playedCap &&
         (cur - 1)->staticEval != SCORE_NONE) {
-      int delta = staticEval + (cur - 1)->staticEval;
-      int ehBonus = std::clamp(delta, -512, 512);
-      Color them = ~board.side_to_move();
-      gravity(history_[them][from_sq((cur - 1)->move)][to_sq((cur - 1)->move)],
-              ehBonus, HISTORY_MAX);
+        // If our eval improved, opponent's last quiet move was bad for them.
+        // delta = how much we improved; apply as malus to their move.
+        int   delta   = staticEval - (cur - 1)->staticEval;
+        int   ehBonus = std::clamp(delta / 2, -512, 512);
+        Color them    = ~board.side_to_move();
+        gravity(history_[them][from_sq((cur - 1)->move)][to_sq((cur - 1)->move)],
+            -ehBonus,
+            HISTORY_MAX);
     }
   } else {
     cur->staticEval = SCORE_NONE;
@@ -763,6 +786,7 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
               TT_LOWER,
               m,
               rawEval != SCORE_NONE ? rawEval : 0,
+              board.rule50_count(),
               false);
           return pcScore;
       }
@@ -794,9 +818,22 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
   ContinuationHistory *ch4 = (cur - 4)->contHistEntry;
 
   // Each ply gets its own dedicated buffer slot
-  MovePicker mp(board, ttMove, ply, killers_[ply][0], killers_[ply][1], counter,
-                history_, captureHistory_, pawnHistory_, ch1, ch2, ch4,
-                moveBufs_[std::min(ply, MAX_PLY - 1)]);
+  MovePicker mp(board,
+      ttMove,
+      ply,
+      killers_[ply][0],
+      killers_[ply][1],
+      counter,
+      history_,
+      captureHistory_,
+      pawnHistory_,
+      ch1,
+      ch2,
+      ch4,
+      moveBufs_[std::min(ply, MAX_PLY - 1)]);
+
+  if (!inCheck && depth <= HIST_PRUNE_DEPTH)
+      mp.set_quiet_threshold(-HIST_PRUNE_MULT * depth);
 
   Move bestMove = MOVE_NONE;
   int bestScore = -SCORE_INFINITE;
@@ -881,9 +918,6 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
           continue;
       }
 
-      if (isQuiet && !inCheck && depth <= HIST_PRUNE_DEPTH &&
-          histScore < -HIST_PRUNE_MULT * depth)
-        continue;
     }
 
     // ── Singular extension ────────────────────────────────────────────────
@@ -920,6 +954,7 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
             TT_LOWER,
             m,
             rawEval != SCORE_NONE ? rawEval : 0,
+            board.rule50_count(),
             false);
         return mcScore;
       } else if (ttScore >= beta) {
@@ -1065,13 +1100,28 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
           (staticEval != SCORE_NONE && staticEval <= origAlpha ? 1 : 0) +
           (bestScore > beta + 209 ? 1 : 0);
 
-      if (isQuiet) {
-        update_killers(m, ply);
-        update_quiet_histories(board, us, m, movedPt, histDepth, ply,
-                               quietsTried, quietCount);
-      } else {
-        update_capture_histories(board, us, m, movedPt, captPt, histDepth,
-                                 capsTried, capsPts, capsCaptPts, capsCount);
+      if (isQuiet)
+      {
+          update_killers(m, ply);
+          update_quiet_histories(board, us, m, movedPt, histDepth, ply, quietsTried, quietCount);
+          // All tried captures also failed — penalise them 
+          // MOVE_NONE as bestMove means only the malus loop runs 
+          if (capsCount > 0)
+              update_capture_histories(board,
+                  us,
+                  MOVE_NONE,
+                  NO_PIECE_TYPE,
+                  NO_PIECE_TYPE,
+                  histDepth,
+                  capsTried,
+                  capsPts,
+                  capsCaptPts,
+                  capsCount);
+      }
+      else
+      {
+          update_capture_histories(
+              board, us, m, movedPt, captPt, histDepth, capsTried, capsPts, capsCaptPts, capsCount);
       }
 
       if (ext < 2)
@@ -1129,7 +1179,14 @@ int Search::negamax(Board &board, int depth, int alpha, int beta, int ply,
     int storeEval =
         (rawEval != SCORE_NONE && std::abs(rawEval) < SCORE_INFINITE) ? rawEval
                                                                       : 0;
-    tt.store(board.key(), score_to_tt(storeScore, ply), depth, flag, bestMove, storeEval, isPV);
+    tt.store(board.key(),
+        score_to_tt(storeScore, ply),
+        depth,
+        flag,
+        bestMove,
+        storeEval,
+        board.rule50_count(),
+        isPV);
   }
 
   return bestScore;
