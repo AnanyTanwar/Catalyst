@@ -54,8 +54,9 @@ Catalyst has not yet been rated by CCRL. The following ratings are based on inte
   - TT move
   - Staged move picker (good captures → killers → countermove → quiets → bad captures)
   - MVV-LVA for captures
-  - Threat-based quiet move scoring (escape bonus / step-in penalty)
-  - Dynamic SEE threshold for good captures
+  - Threat-based quiet move scoring with precomputed opponent attack maps
+  - Continuation history–weighted quiet move ordering (1-ply > 2-ply > 4-ply)
+  - Dynamic SEE thresholds for capture classification based on move score
   - Bad captures ordered by SEE loss (least-losing first)
   - Killer move heuristic (2 per ply)
   - Countermove heuristic
