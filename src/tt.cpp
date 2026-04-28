@@ -266,24 +266,23 @@ int TT::hashfull() const
     if (!table || numClusters == 0)
         return 0;
 
-    constexpr size_t SAMPLE = 2000;
-    const size_t     limit  = std::min(numClusters, SAMPLE);
+    constexpr size_t SAMPLE = 1000;
+    const size_t     stride = std::max(numClusters / SAMPLE, size_t(1));
 
     size_t filled = 0;
+    size_t count  = 0;
 
-    for (size_t i = 0; i < limit; ++i)
+    for (size_t i = 0; i < numClusters; i += stride)
     {
         for (int j = 0; j < 4; ++j)
         {
             const TTEntry &e = table[i].entries[j];
             if (!e.is_empty() && (e.agePvBound & TT_AGE_MASK) == currentGen)
-            {
                 ++filled;
-            }
         }
+        ++count;
     }
 
-    return int(filled * 1000 / (limit * 4));
+    return count > 0 ? int(filled * 1000 / (count * 4)) : 0;
 }
-
 }
