@@ -337,9 +337,6 @@ void MovePicker::generate_and_score_quiets()
                 sc += (*contHist4)[pt][to] / 2;
         }
 
-        if (board.gives_check(m))
-            sc += 8000;
-
         // Threat escape bonus/malus — uses precomputed oppThreats
         {
             const Bitboard fromBB = square_bb(from_sq(m));
