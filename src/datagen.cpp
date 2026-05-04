@@ -26,6 +26,7 @@
 #include <atomic>
 #include <cassert>
 #include <csignal>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -39,56 +40,105 @@ namespace Catalyst {
 namespace Datagen {
 
     static std::atomic<bool>     g_stop { false };
-    static std::atomic<uint64_t> g_positions { 0 };
     static std::atomic<uint64_t> g_games { 0 };
+    static std::atomic<uint64_t> g_positions { 0 };
 
     static void install_sigint_handler()
     {
         std::signal(SIGINT, [](int) { g_stop.store(true, std::memory_order_seq_cst); });
     }
 
-    static constexpr int WIN_ADJ_SCORE    = 1200;
-    static constexpr int WIN_ADJ_PLIES    = 5;
-    static constexpr int DRAW_ADJ_SCORE   = 10;
-    static constexpr int DRAW_ADJ_MIN_PLY = 70;
-    static constexpr int DRAW_ADJ_PLIES   = 10;
-    static constexpr int MAX_GAME_PLY     = 400;
-    static constexpr int MAX_POSITIONS    = 50;
-    static constexpr int SCORE_CLAMP      = 3000;
-    static constexpr int FLUSH_EVERY      = 100;
-    static constexpr int MATE_SCORE       = 20000;
-
-    // clang-format off
-    static constexpr std::array<int, 64> kCenterBonus = {
-        1, 1, 1, 1, 1, 1, 1, 1,
-        1, 2, 2, 2, 2, 2, 2, 1,
-        2, 3, 3, 3, 3, 3, 3, 2,
-        3, 5, 5, 5, 5, 5, 5, 3,
-        4, 6, 7, 9, 9, 7, 6, 4,
-        4, 6, 8, 8, 8, 8, 6, 4,
-        3, 5, 6, 6, 6, 6, 5, 3,
-        1, 1, 4, 4, 4, 4, 1, 1
-    };
-    // clang-format on
-
-    struct PosEntry {
-        std::string fen;
-        int         score;
-    };
-
-    static Move pick_weighted_move(const MoveList &moves, Color stm, std::mt19937_64 &rng)
+    PackedBoard PackedBoard::pack(const Board &board, int16_t score, Outcome outcome)
     {
-        std::vector<int> weights;
-        weights.reserve(moves.size());
-        for (int i = 0; i < (int)moves.size(); ++i)
+        PackedBoard packed { };
+        std::memset(packed.pieces, 0, sizeof(packed.pieces));
+
+        uint64_t occ_bb = board.pieces();
+        packed.occ      = occ_bb;
+
+        uint64_t unmoved_rook_bb = 0;
         {
-            int sq = int(to_sq(moves.moves[i]));
-            if (stm == BLACK)
-                sq ^= 56;
-            weights.push_back(kCenterBonus[sq]);
+            const int cr = board.castling_rights();
+            if (cr & WHITE_OO)
+                unmoved_rook_bb |= square_bb(board.castling_rook_square(WHITE_OO));
+            if (cr & WHITE_OOO)
+                unmoved_rook_bb |= square_bb(board.castling_rook_square(WHITE_OOO));
+            if (cr & BLACK_OO)
+                unmoved_rook_bb |= square_bb(board.castling_rook_square(BLACK_OO));
+            if (cr & BLACK_OOO)
+                unmoved_rook_bb |= square_bb(board.castling_rook_square(BLACK_OOO));
         }
-        std::discrete_distribution<int> dist(weights.begin(), weights.end());
-        return moves.moves[dist(rng)];
+
+        int      nibble_idx = 0;
+        uint64_t tmp        = occ_bb;
+        while (tmp)
+        {
+            int sq_int = __builtin_ctzll(tmp);
+            tmp &= tmp - 1;
+            Square sq = Square(sq_int);
+
+            Piece p   = board.piece_on(sq);
+            int   pt  = static_cast<int>(piece_type(p));
+            int   col = (piece_color(p) == BLACK) ? 1 : 0;
+
+            if (pt == static_cast<int>(ROOK) && (unmoved_rook_bb & square_bb(sq)))
+                pt = 6;
+
+            uint8_t nibble = static_cast<uint8_t>((col << 3) | pt);
+            assert(nibble <= 0x0F);
+            assert(nibble_idx < 32);
+
+            int byte_idx = nibble_idx / 2;
+            if (nibble_idx % 2 == 0)
+                packed.pieces[byte_idx] = nibble;
+            else
+                packed.pieces[byte_idx] |= uint8_t(nibble << 4);
+
+            nibble_idx++;
+        }
+
+        uint8_t ep_raw = static_cast<uint8_t>(board.ep_square());
+        packed.stm_ep
+            = static_cast<uint8_t>((board.side_to_move() == BLACK ? 0x80u : 0x00u) | ep_raw);
+        packed.halfmoves = static_cast<uint8_t>(board.rule50_count());
+        packed.fullmoves = static_cast<uint16_t>(board.game_ply() / 2 + 1);
+        packed.eval      = score;
+        packed.outcome   = outcome;
+        packed.pad       = 0;
+
+        return packed;
+    }
+
+    ViriMove ViriMove::from_move(Move m, int score)
+    {
+        ViriMove vm { };
+
+        int from  = from_sq(m);
+        int to    = to_sq(m);
+        int mtype = move_type(m);
+
+        static constexpr uint16_t vf_type[4] = {
+            0x0000,
+            0x8000,
+            0x4000,
+            0xC000,
+        };
+
+        int promo = 0;
+
+        if (mtype == MT_PROMOTION)
+        {
+            promo = static_cast<int>(promo_piece(m)) - static_cast<int>(KNIGHT);
+            promo = std::clamp(promo, 0, 3);
+        }
+
+        vm.move = static_cast<uint16_t>(
+            (from & 0x3F) | ((to & 0x3F) << 6) | ((promo & 0x3) << 12) | vf_type[mtype & 0x3]);
+
+        vm.score = static_cast<int16_t>(
+            std::clamp(score, static_cast<int>(INT16_MIN), static_cast<int>(INT16_MAX)));
+
+        return vm;
     }
 
     static std::vector<std::string> load_book(const std::string &path)
@@ -100,7 +150,7 @@ namespace Datagen {
         std::ifstream f(path);
         if (!f)
         {
-            std::cerr << "Datagen: could not open book " << path << "\n";
+            std::cerr << "Datagen: could not open book '" << path << "'\n";
             return fens;
         }
 
@@ -109,11 +159,12 @@ namespace Datagen {
         {
             if (line.empty())
                 continue;
+
             std::istringstream       iss(line);
             std::vector<std::string> parts;
-            std::string              p;
-            while (iss >> p)
-                parts.push_back(p);
+            std::string              tok;
+            while (iss >> tok)
+                parts.push_back(tok);
 
             if (parts.size() >= 4)
             {
@@ -122,57 +173,51 @@ namespace Datagen {
                 fens.push_back(fen);
             }
         }
+
         std::cerr << "Datagen: loaded " << fens.size() << " book positions\n";
         return fens;
     }
 
-    static void sample_positions(std::vector<PosEntry> &positions,
-        int                                             max_count,
-        std::mt19937_64                                &rng)
-    {
-        const int n = (int)positions.size();
-        if (n <= max_count)
-            return;
-
-        std::vector<PosEntry> sampled;
-        sampled.reserve(max_count);
-        const double step   = double(n) / double(max_count);
-        const double offset = std::uniform_real_distribution<double>(0.0, step)(rng);
-        for (int i = 0; i < max_count; ++i)
-        {
-            int idx = std::min(int(offset + i * step), n - 1);
-            sampled.push_back(std::move(positions[idx]));
-        }
-        positions = std::move(sampled);
-    }
+    struct GameRecord {
+        PackedBoard           root;
+        std::vector<ViriMove> moves;
+        Outcome               outcome = Outcome::Invalid;
+    };
 
     static void datagen_thread(int      thread_id,
         const DatagenConfig            &cfg,
         const std::vector<std::string> &book)
     {
-        const std::string thread_file = cfg.output_path + ".t" + std::to_string(thread_id);
-        std::ofstream     out(thread_file, std::ios::app);
+        const std::string filename = cfg.output_path + ".t" + std::to_string(thread_id);
+        std::ofstream     out(filename, std::ios::binary | std::ios::app);
         if (!out)
         {
-            std::cerr << "Datagen: failed to open " << thread_file << "\n";
+            std::cerr << "Datagen: failed to open output file '" << filename << "'\n";
             return;
         }
 
-        std::mt19937_64 rng(std::random_device { }() + uint64_t(thread_id) * 0x9e3779b97f4a7c15ULL);
+        std::mt19937_64 rng(
+            std::random_device { }() ^ (static_cast<uint64_t>(thread_id) * 0x9e3779b97f4a7c15ULL));
 
         auto searcher      = std::make_unique<Search>();
         searcher->isSilent = true;
 
-        auto statePool = std::make_unique<StateInfo[]>(4096);
+        constexpr int STATE_POOL_SIZE = 4096;
+        auto          statePool       = std::make_unique<StateInfo[]>(STATE_POOL_SIZE);
 
-        const int target_games      = cfg.games;
-        int       games_since_flush = 0;
+        const int     target_games  = cfg.games;
+        int           flush_counter = 0;
+        constexpr int FLUSH_EVERY   = 64;
 
-        for (int game = 0; !g_stop.load(std::memory_order_relaxed)
-                           && (target_games == 0 || int(g_games.load()) < target_games);
-            ++game)
+        while (!g_stop.load(std::memory_order_relaxed))
         {
+            if (target_games > 0
+                && static_cast<int>(g_games.load(std::memory_order_relaxed)) >= target_games)
+                break;
+
             Board board;
+            int   sp = 0;
+
             tt.clear();
 
             if (!book.empty())
@@ -185,67 +230,69 @@ namespace Datagen {
                 board.set_startpos();
             }
 
-            std::uniform_int_distribution<int> ply_dist(cfg.random_plies_min, cfg.random_plies_max);
-            int                                open_plies = ply_dist(rng);
-
-            int  sp    = 0;
-            bool valid = true;
-
-            for (int i = 0; i < open_plies && sp < 4090; ++i)
             {
-                MoveList moves = generate_legal(board);
-                if (moves.empty())
-                {
-                    valid = false;
-                    break;
-                }
-                Move m = pick_weighted_move(moves, board.side_to_move(), rng);
-                board.make_move(m, statePool[sp++]);
-            }
+                std::uniform_int_distribution<int> ply_dist(cfg.random_plies_min,
+                    cfg.random_plies_max);
+                const int                          open_plies = ply_dist(rng);
 
-            if (!valid || generate_legal(board).empty())
-                continue;
+                bool valid = true;
+                for (int i = 0; i < open_plies && sp < STATE_POOL_SIZE - cfg.max_game_ply - 2; ++i)
+                {
+                    MoveList moves = generate_legal(board);
+                    if (moves.empty())
+                    {
+                        valid = false;
+                        break;
+                    }
+
+                    std::uniform_int_distribution<int> mpick(0, static_cast<int>(moves.size()) - 1);
+                    board.make_move(moves.moves[mpick(rng)], statePool[sp++]);
+                }
+
+                if (!valid || generate_legal(board).empty())
+                    continue;
+            }
 
             {
                 SearchLimits vl;
-                vl.depth     = 8;
-                vl.hardNodes = 10000;
-                vl.infinite  = false;
+                vl.depth    = cfg.verify_depth;
+                vl.infinite = false;
 
                 TimeManager vtm;
                 vtm.init(vl, board.side_to_move(), 0);
                 vtm.start_clock();
+
                 searcher->best_move(board, vtm);
-                int verify_score = searcher->last_score();
+                const int vscore = searcher->last_score();
                 tt.clear();
 
-                if (std::abs(verify_score) > cfg.verify_limit)
+                if (std::abs(vscore) > cfg.verify_limit)
                     continue;
             }
 
-            std::vector<PosEntry> positions;
-            positions.reserve(80);
+            GameRecord rec;
+            rec.root = PackedBoard::pack(board, 0, Outcome::Invalid);
+            rec.moves.reserve(256);
 
-            int win_plies  = 0;
-            int loss_plies = 0;
-            int draw_plies = 0;
-            int result     = -1;
+            int     win_plies  = 0;
+            int     loss_plies = 0;
+            int     draw_plies = 0;
+            Outcome outcome    = Outcome::Invalid;
 
-            for (int ply = 0; ply < MAX_GAME_PLY && sp < 4090; ++ply)
+            for (int ply = 0; ply < cfg.max_game_ply && sp < STATE_POOL_SIZE - 2; ++ply)
             {
-                if (board.is_draw(ply) || board.rule50_count() >= 100)
+                if (board.rule50_count() >= 100 || board.is_draw(ply))
                 {
-                    result = 1;
+                    outcome = Outcome::Draw;
                     break;
                 }
 
                 MoveList moves = generate_legal(board);
                 if (moves.empty())
                 {
-                    if (board.in_check())
-                        result = (board.side_to_move() == WHITE) ? 0 : 2;
-                    else
-                        result = 1;
+                    outcome = board.in_check() ? (board.side_to_move() == WHITE ? Outcome::BlackWin
+                                                                                : Outcome::WhiteWin)
+                                               : Outcome::Draw;
                     break;
                 }
 
@@ -264,36 +311,34 @@ namespace Datagen {
                 if (best == MOVE_NONE)
                     break;
 
-                int white_score = (board.side_to_move() == WHITE) ? score : -score;
+                const int white_score = (board.side_to_move() == WHITE) ? score : -score;
 
-                if (std::abs(score) >= MATE_SCORE)
+                if (std::abs(score) >= SCORE_MATE_IN_MAX_PLY)
                 {
-                    result = (white_score > 0) ? 2 : 0;
+                    outcome           = (white_score > 0) ? Outcome::WhiteWin : Outcome::BlackWin;
+                    const int mate_cp = (white_score > 0) ? cfg.score_clamp : -cfg.score_clamp;
+                    rec.moves.push_back(ViriMove::from_move(best, mate_cp));
                     break;
                 }
 
-                bool in_check = board.in_check();
-                bool is_noisy = board.is_capture(best) || is_promotion(best);
+                const int clamped = std::clamp(white_score, -cfg.score_clamp, cfg.score_clamp);
+                rec.moves.push_back(ViriMove::from_move(best, clamped));
 
-                if (!in_check && !is_noisy)
-                {
-                    const int clamped = std::clamp(white_score, -SCORE_CLAMP, SCORE_CLAMP);
-                    positions.push_back({ board.get_fen(), clamped });
-                }
+                const int abs_score = std::abs(white_score);
 
-                if (score > WIN_ADJ_SCORE)
+                if (white_score > cfg.win_adj_score)
                 {
-                    ++win_plies;
+                    win_plies++;
                     loss_plies = draw_plies = 0;
                 }
-                else if (score < -WIN_ADJ_SCORE)
+                else if (white_score < -cfg.win_adj_score)
                 {
-                    ++loss_plies;
+                    loss_plies++;
                     win_plies = draw_plies = 0;
                 }
-                else if (ply >= DRAW_ADJ_MIN_PLY && std::abs(score) < DRAW_ADJ_SCORE)
+                else if (ply >= cfg.draw_adj_min_ply && abs_score < cfg.draw_adj_score)
                 {
-                    ++draw_plies;
+                    draw_plies++;
                     win_plies = loss_plies = 0;
                 }
                 else
@@ -301,46 +346,50 @@ namespace Datagen {
                     win_plies = loss_plies = draw_plies = 0;
                 }
 
-                if (win_plies >= WIN_ADJ_PLIES)
+                if (win_plies >= cfg.win_adj_plies)
                 {
-                    result = (white_score > 0) ? 2 : 0;
+                    outcome = Outcome::WhiteWin;
                     break;
                 }
-                if (loss_plies >= WIN_ADJ_PLIES)
+                if (loss_plies >= cfg.win_adj_plies)
                 {
-                    result = (white_score > 0) ? 2 : 0;
+                    outcome = Outcome::BlackWin;
                     break;
                 }
-                if (draw_plies >= DRAW_ADJ_PLIES)
+                if (draw_plies >= cfg.draw_adj_plies)
                 {
-                    result = 1;
+                    outcome = Outcome::Draw;
                     break;
                 }
 
                 board.make_move(best, statePool[sp++]);
             }
 
-            if (result == -1)
-                result = 1;
+            if (outcome == Outcome::Invalid)
+                outcome = Outcome::Draw;
 
-            sample_positions(positions, MAX_POSITIONS, rng);
+            rec.root.outcome = outcome;
 
-            const char *wdl = (result == 2) ? "1.0" : (result == 0) ? "0.0" : "0.5";
+            out.write(reinterpret_cast<const char *>(&rec.root), sizeof(PackedBoard));
+            out.write(reinterpret_cast<const char *>(rec.moves.data()),
+                sizeof(ViriMove) * rec.moves.size());
+            const ViriMove sentinel = ViriMove::sentinel();
+            out.write(reinterpret_cast<const char *>(&sentinel), sizeof(ViriMove));
 
-            for (const auto &p : positions)
-                out << p.fen << " | " << p.score << " | " << wdl << "\n";
+            const uint64_t gc = g_games.fetch_add(1, std::memory_order_relaxed) + 1;
+            g_positions.fetch_add(rec.moves.size(), std::memory_order_relaxed);
 
-            uint64_t pos_count = g_positions.fetch_add(positions.size()) + positions.size();
-            uint64_t gm_count  = g_games.fetch_add(1) + 1;
-
-            if (++games_since_flush >= FLUSH_EVERY)
+            if (++flush_counter >= FLUSH_EVERY)
             {
                 out.flush();
-                games_since_flush = 0;
+                flush_counter = 0;
             }
 
-            if (thread_id == 0 && (gm_count % 256) == 0)
-                std::cerr << "Datagen: " << gm_count << " games, " << pos_count << " positions\n";
+            if (thread_id == 0 && (gc % 512) == 0)
+            {
+                std::cerr << "Datagen: " << gc << " games, "
+                          << g_positions.load(std::memory_order_relaxed) << " positions\n";
+            }
         }
 
         out.flush();
@@ -349,45 +398,47 @@ namespace Datagen {
 
     static void merge_files(const DatagenConfig &cfg)
     {
-        std::ofstream merged(cfg.output_path, std::ios::app);
+        std::ofstream merged(cfg.output_path, std::ios::binary | std::ios::app);
         if (!merged)
         {
-            std::cerr << "Datagen: failed to open merged output " << cfg.output_path << "\n";
+            std::cerr << "Datagen: failed to open merged output '" << cfg.output_path << "'\n";
             return;
         }
 
         for (int i = 0; i < cfg.threads; ++i)
         {
             const std::string tp = cfg.output_path + ".t" + std::to_string(i);
-            std::ifstream     tf(tp);
-            if (tf)
-                merged << tf.rdbuf();
+            {
+                std::ifstream tf(tp, std::ios::binary);
+                if (tf)
+                    merged << tf.rdbuf();
+            }
             std::remove(tp.c_str());
         }
     }
 
     void run(const DatagenConfig &cfg)
     {
-        std::cerr << "Datagen: " << cfg.threads << " threads"
-                  << ", soft nodes=" << cfg.soft_nodes << ", hard nodes=" << cfg.hard_nodes
-                  << ", games=" << (cfg.games == 0 ? "unlimited" : std::to_string(cfg.games))
-                  << "\nOutput: " << cfg.output_path << "\n";
+        std::cerr << "Datagen: " << cfg.threads << " thread(s)"
+                  << "  soft=" << cfg.soft_nodes << " hard=" << cfg.hard_nodes
+                  << "  games=" << (cfg.games == 0 ? "unlimited" : std::to_string(cfg.games))
+                  << "\n  output: " << cfg.output_path << "\n";
 
         install_sigint_handler();
 
-        std::vector<std::string> book = load_book(cfg.book_path);
+        const std::vector<std::string> book = load_book(cfg.book_path);
         if (book.empty())
-            std::cerr << "Datagen: no book — using startpos + " << cfg.random_plies_min << "-"
+            std::cerr << "Datagen: no book — startpos + " << cfg.random_plies_min << "-"
                       << cfg.random_plies_max << " random plies\n";
 
         tt.resize(128);
-        g_positions.store(0);
+
         g_games.store(0);
+        g_positions.store(0);
         g_stop.store(false);
 
         std::vector<std::thread> threads;
         threads.reserve(cfg.threads);
-
         for (int i = 0; i < cfg.threads; ++i)
             threads.emplace_back(datagen_thread, i, std::cref(cfg), std::cref(book));
 
@@ -404,27 +455,45 @@ namespace Datagen {
     {
         DatagenConfig      cfg;
         std::istringstream iss(args);
-        std::string        token;
-        while (iss >> token)
+        std::string        tok;
+
+        while (iss >> tok)
         {
-            if (token == "output")
+            if (tok == "output")
                 iss >> cfg.output_path;
-            else if (token == "threads")
+            else if (tok == "threads")
                 iss >> cfg.threads;
-            else if (token == "games")
+            else if (tok == "games")
                 iss >> cfg.games;
-            else if (token == "softnodes")
+            else if (tok == "softnodes")
                 iss >> cfg.soft_nodes;
-            else if (token == "hardnodes")
+            else if (tok == "hardnodes")
                 iss >> cfg.hard_nodes;
-            else if (token == "book")
+            else if (tok == "book")
                 iss >> cfg.book_path;
-            else if (token == "nodes")
+            else if (tok == "dfrc")
+                cfg.dfrc = true;
+            else if (tok == "verifydepth")
+                iss >> cfg.verify_depth;
+            else if (tok == "verifylimit")
+                iss >> cfg.verify_limit;
+            else if (tok == "minply")
+                iss >> cfg.random_plies_min;
+            else if (tok == "maxply")
+                iss >> cfg.random_plies_max;
+            else if (tok == "winadj")
+                iss >> cfg.win_adj_score;
+            else if (tok == "drawadjscore")
+                iss >> cfg.draw_adj_score;
+            else if (tok == "scoreclamp")
+                iss >> cfg.score_clamp;
+            else if (tok == "nodes")
             {
                 iss >> cfg.soft_nodes;
                 cfg.hard_nodes = cfg.soft_nodes * 4;
             }
         }
+
         return cfg;
     }
 
