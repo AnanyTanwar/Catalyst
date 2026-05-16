@@ -1,15 +1,13 @@
-<div align="center">
-  <img width="200" height="200" alt="Catalyst" src="assets/logo.png" />
-  <h1>Catalyst</h1>
+# Catalyst
+
+> A UCI-compliant chess engine written in C++20, featuring NNUE evaluation and advanced search.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPL_v3-blue.svg)](https://github.com/AnanyTanwar/Catalyst/blob/main/LICENSE)
 [![Catalyst Build](https://github.com/AnanyTanwar/Catalyst/actions/workflows/catalyst.yml/badge.svg)](https://github.com/AnanyTanwar/Catalyst/actions/workflows/catalyst.yml)
 [![release](https://img.shields.io/github/v/release/AnanyTanwar/Catalyst?logo=github&color=32CD32)](https://github.com/AnanyTanwar/Catalyst/releases/latest)
 [![commits since release](https://img.shields.io/github/commits-since/AnanyTanwar/Catalyst/latest?logo=github&color=FF8C00)](https://github.com/AnanyTanwar/Catalyst/commits/main)
 
-</div>
-
-A UCI-compliant chess engine written in C++20, featuring NNUE evaluation and advanced search. Catalyst uses a `(768 → 256)×2 → 8` neural network with incremental accumulator updates and SIMD-accelerated inference (SSE4.1 / AVX2 / AVX-512), combined with a robust search implementation including PVS, Lazy SMP, and an extensive suite of pruning, extension, and reduction techniques.
+Catalyst uses a `(768 → 256)×2 → 8` neural network with incremental accumulator updates and SIMD-accelerated inference (SSE4.1 / AVX2 / AVX-512), combined with a robust search implementation including PVS, Lazy SMP, and an extensive suite of pruning, extension, and reduction techniques.
 
 ---
 
