@@ -19,6 +19,8 @@
 #include "board.h"
 #include "types.h"
 
+#include <new>
+
 namespace Catalyst {
 
 // SEE thresholds
@@ -39,16 +41,22 @@ inline constexpr int QUIET_PRUNE_DISABLED = -32000000;
     return int(pawnKey & (PAWN_HISTORY_SIZE - 1));
 }
 
-// Butterfly history: [color][from][to]
-using ButterflyHistory = int[COLOR_NB][SQUARE_NB][SQUARE_NB];
+// Threat index helper
+[[nodiscard]] FORCE_INLINE int threat_index(Square from, Square to, Bitboard threats)
+{
+    return 2 * bool(threats & square_bb(from)) + bool(threats & square_bb(to));
+}
 
-// Capture history: [color][attacker_type][to_sq][victim_type]
-using CaptureHistory = int[COLOR_NB][PIECE_TYPE_NB][SQUARE_NB][PIECE_TYPE_NB];
+// Butterfly history
+using ButterflyHistory = int[COLOR_NB][SQUARE_NB][SQUARE_NB][4];
 
-// Continuation history: [piece_type][to_sq] (1-ply, 2-ply, 4-ply follow-up)
+// Capture history
+using CaptureHistory = int[COLOR_NB][PIECE_TYPE_NB][SQUARE_NB][PIECE_TYPE_NB][4];
+
+// Continuation history
 using ContinuationHistory = int[PIECE_TYPE_NB][SQUARE_NB];
 
-// Pawn history: [pawn_key_bucket][piece_type][to_sq]
+// Pawn history
 using PawnHistory = int[PAWN_HISTORY_SIZE][PIECE_TYPE_NB][SQUARE_NB];
 
 // Move ordering stages
@@ -86,6 +94,7 @@ public:
         const ContinuationHistory *contHist1,
         const ContinuationHistory *contHist2,
         const ContinuationHistory *contHist4,
+        Bitboard                   threats,
         MoveBuffer                &buf);
 
     // Qsearch / probcut constructor
@@ -120,14 +129,15 @@ public:
     Move *moves;
     int  *scores;
 
-    int  cur;
-    int  goodCaptEnd;
-    int  captEnd;
-    int  quietEnd;
-    int  badCaptCur;
-    int  seeThreshold;
-    bool qsearchMode;
-    int  quietThreshold_ = QUIET_PRUNE_DISABLED;
+    int      cur;
+    int      goodCaptEnd;
+    int      captEnd;
+    int      quietEnd;
+    int      badCaptCur;
+    int      seeThreshold;
+    bool     qsearchMode;
+    Bitboard threats         = 0;
+    int      quietThreshold_ = QUIET_PRUNE_DISABLED;
 
     void generate_and_score_captures();
     void generate_and_score_quiets();
