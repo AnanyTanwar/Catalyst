@@ -54,6 +54,7 @@ Search::Search()
 void Search::clear_tables()
 {
     std::memset(history_, 0, sizeof(history_));
+    std::memset(pieceToHistory_, 0, sizeof(pieceToHistory_));
     std::memset(captureHistory_, 0, sizeof(captureHistory_));
     std::memset(pawnHistory_, 0, sizeof(pawnHistory_));
     std::memset(counterMoves_, 0, sizeof(counterMoves_));
@@ -102,8 +103,11 @@ bool Search::is_valid_tt_move(const Board &board, Move m) const
 // ---------------------------------------------------------------------------
 int Search::quiet_hist_score(const Board &board, Color us, Move m, PieceType movedPt, int ply) const
 {
-    int s
+    int butterfly
         = history_[us][from_sq(m)][to_sq(m)][threat_index(from_sq(m), to_sq(m), ss(ply)->threats)];
+    int pieceTo = pieceToHistory_[us][movedPt][to_sq(m)]
+                                 [threat_index(from_sq(m), to_sq(m), ss(ply)->threats)];
+    int s       = (butterfly + pieceTo) / 2;
     s += pawnHistory_[pawn_history_index(board.pawn_key())][movedPt][to_sq(m)];
     const SearchStack *cur = ss(ply);
     if ((cur - 1)->contHistEntry)
@@ -161,30 +165,66 @@ void Search::update_quiet_histories(const Board &board,
                     [threat_index(from_sq(bestMove), to_sq(bestMove), threats)],
         bonus,
         HISTORY_MAX);
+    gravity(pieceToHistory_[us][bestPt][to_sq(bestMove)]
+                           [threat_index(from_sq(bestMove), to_sq(bestMove), threats)],
+        bonus,
+        HISTORY_MAX);
     gravity(pawnHistory_[phIdx][bestPt][to_sq(bestMove)], bonus, HISTORY_MAX);
+
+    // Compute base for weighted conthist update
+    int bestMainHist
+        = (history_[us][from_sq(bestMove)][to_sq(bestMove)]
+                   [threat_index(from_sq(bestMove), to_sq(bestMove), threats)]
+              + pieceToHistory_[us][bestPt][to_sq(bestMove)]
+                               [threat_index(from_sq(bestMove), to_sq(bestMove), threats)])
+          / 2;
+    int bestContHist = 0;
     if (ch1)
-        gravity((*ch1)[bestPt][to_sq(bestMove)], bonus, HISTORY_MAX);
+        bestContHist += (*ch1)[bestPt][to_sq(bestMove)];
     if (ch2)
-        gravity((*ch2)[bestPt][to_sq(bestMove)], bonus, HISTORY_MAX);
+        bestContHist += (*ch2)[bestPt][to_sq(bestMove)];
     if (ch4)
-        gravity((*ch4)[bestPt][to_sq(bestMove)], bonus / 2, HISTORY_MAX);
+        bestContHist += (*ch4)[bestPt][to_sq(bestMove)] / 2;
+    int bestBase = bestContHist + bestMainHist / 2;
+
+    if (ch1)
+        (*ch1)[bestPt][to_sq(bestMove)] += bonus - bestBase * std::abs(bonus) / HISTORY_MAX;
+    if (ch2)
+        (*ch2)[bestPt][to_sq(bestMove)] += bonus - bestBase * std::abs(bonus) / HISTORY_MAX;
+    if (ch4)
+        (*ch4)[bestPt][to_sq(bestMove)]
+            += (bonus / 2) - bestBase * std::abs(bonus / 2) / HISTORY_MAX;
 
     for (int i = 0; i < triedCount; ++i)
     {
         if (tried[i] == bestMove)
             continue;
-        PieceType qpt = piece_type(board.piece_on(from_sq(tried[i])));
-        gravity(history_[us][from_sq(tried[i])][to_sq(tried[i])]
-                        [threat_index(from_sq(tried[i]), to_sq(tried[i]), threats)],
-            malus,
-            HISTORY_MAX);
+        PieceType qpt  = piece_type(board.piece_on(from_sq(tried[i])));
+        int       tidx = threat_index(from_sq(tried[i]), to_sq(tried[i]), threats);
+
+        gravity(history_[us][from_sq(tried[i])][to_sq(tried[i])][tidx], malus, HISTORY_MAX);
+        gravity(pieceToHistory_[us][qpt][to_sq(tried[i])][tidx], malus, HISTORY_MAX);
         gravity(pawnHistory_[phIdx][qpt][to_sq(tried[i])], malus, HISTORY_MAX);
+
+        int triedMainHist = (history_[us][from_sq(tried[i])][to_sq(tried[i])][tidx]
+                                + pieceToHistory_[us][qpt][to_sq(tried[i])][tidx])
+                            / 2;
+        int triedContHist = 0;
         if (ch1)
-            gravity((*ch1)[qpt][to_sq(tried[i])], malus, HISTORY_MAX);
+            triedContHist += (*ch1)[qpt][to_sq(tried[i])];
         if (ch2)
-            gravity((*ch2)[qpt][to_sq(tried[i])], malus, HISTORY_MAX);
+            triedContHist += (*ch2)[qpt][to_sq(tried[i])];
         if (ch4)
-            gravity((*ch4)[qpt][to_sq(tried[i])], malus / 2, HISTORY_MAX);
+            triedContHist += (*ch4)[qpt][to_sq(tried[i])] / 2;
+        int triedBase = triedContHist + triedMainHist / 2;
+
+        if (ch1)
+            (*ch1)[qpt][to_sq(tried[i])] += malus - triedBase * std::abs(malus) / HISTORY_MAX;
+        if (ch2)
+            (*ch2)[qpt][to_sq(tried[i])] += malus - triedBase * std::abs(malus) / HISTORY_MAX;
+        if (ch4)
+            (*ch4)[qpt][to_sq(tried[i])]
+                += (malus / 2) - triedBase * std::abs(malus / 2) / HISTORY_MAX;
     }
 }
 
@@ -678,6 +718,11 @@ int Search::negamax(Board &board,
                                     [threat_index(from_sq(ttMove), to_sq(ttMove), cur->threats)],
                         bonus,
                         HISTORY_MAX);
+                    gravity(
+                        pieceToHistory_[us][ttPt][to_sq(ttMove)]
+                                       [threat_index(from_sq(ttMove), to_sq(ttMove), cur->threats)],
+                        bonus,
+                        HISTORY_MAX);
                     int phIdx = pawn_history_index(board.pawn_key());
                     gravity(pawnHistory_[phIdx][ttPt][to_sq(ttMove)], bonus, HISTORY_MAX);
                     if ((cur - 1)->contHistEntry)
@@ -700,6 +745,11 @@ int Search::negamax(Board &board,
                     PieceType ttPt = piece_type(board.piece_on(from_sq(ttMove)));
                     gravity(history_[us][from_sq(ttMove)][to_sq(ttMove)]
                                     [threat_index(from_sq(ttMove), to_sq(ttMove), cur->threats)],
+                        -malus,
+                        HISTORY_MAX);
+                    gravity(
+                        pieceToHistory_[us][ttPt][to_sq(ttMove)]
+                                       [threat_index(from_sq(ttMove), to_sq(ttMove), cur->threats)],
                         -malus,
                         HISTORY_MAX);
                     int phIdx = pawn_history_index(board.pawn_key());
@@ -754,6 +804,12 @@ int Search::negamax(Board &board,
                             [threat_index(from_sq((cur - 1)->move),
                                 to_sq((cur - 1)->move),
                                 (cur - 1)->threats)],
+                -ehBonus,
+                HISTORY_MAX);
+            gravity(pieceToHistory_[them][(cur - 1)->movedPt][to_sq((cur - 1)->move)]
+                                   [threat_index(from_sq((cur - 1)->move),
+                                       to_sq((cur - 1)->move),
+                                       (cur - 1)->threats)],
                 -ehBonus,
                 HISTORY_MAX);
         }

@@ -50,6 +50,9 @@ inline constexpr int QUIET_PRUNE_DISABLED = -32000000;
 // Butterfly history
 using ButterflyHistory = int[COLOR_NB][SQUARE_NB][SQUARE_NB][4];
 
+// PieceTo history 
+using PieceToHistory = int[COLOR_NB][PIECE_TYPE_NB][SQUARE_NB][4];
+
 // Capture history
 using CaptureHistory = int[COLOR_NB][PIECE_TYPE_NB][SQUARE_NB][PIECE_TYPE_NB][4];
 

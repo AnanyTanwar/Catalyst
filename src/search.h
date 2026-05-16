@@ -171,6 +171,7 @@ private:
     TimeManager *tm_ = nullptr;
 
     ButterflyHistory    history_;
+    PieceToHistory      pieceToHistory_;
     CaptureHistory      captureHistory_;
     PawnHistory         pawnHistory_;
     Move                counterMoves_[COLOR_NB][SQUARE_NB][SQUARE_NB];
