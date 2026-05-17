@@ -176,7 +176,7 @@ make pgo ARCH=bmi2
 make pgo ARCH=avx512
 make pgo ARCH=avx2
 
-# Build with debug symbols and sanitizers (optional)
+# Build with debug symbols and sanitizers (Optional)
 make debug
 make debug SANITIZE=-fsanitize=address,undefined
 
