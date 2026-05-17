@@ -19,8 +19,6 @@
 #include "board.h"
 #include "types.h"
 
-#include <new>
-
 namespace Catalyst {
 
 // SEE thresholds
