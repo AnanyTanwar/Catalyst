@@ -255,7 +255,8 @@ private:
         int                                  ply,
         Move                                *tried,
         int                                  triedCount,
-        Bitboard                             threats);
+        Bitboard                             threats,
+        bool                                 improving);
     void              update_capture_histories(const Board &board,
         Color                                  us,
         Move                                   bestMove,
