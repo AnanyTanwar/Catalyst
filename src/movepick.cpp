@@ -64,6 +64,7 @@ MovePicker::MovePicker(const Board &b,
     const PawnHistory              &pawnHist,
     const ContinuationHistory      *ch1,
     const ContinuationHistory      *ch2,
+    const ContinuationHistory      *ch3,
     const ContinuationHistory      *ch4,
     Bitboard                        thr,
     MoveBuffer                     &buf)
@@ -80,6 +81,7 @@ MovePicker::MovePicker(const Board &b,
     , pawnHistory(&pawnHist)
     , contHist1(ch1)
     , contHist2(ch2)
+    , contHist3(ch3)
     , contHist4(ch4)
     , moves(buf.moves)
     , scores(buf.scores)
@@ -118,6 +120,7 @@ MovePicker::MovePicker(const Board &b,
     , pawnHistory(nullptr)
     , contHist1(nullptr)
     , contHist2(nullptr)
+    , contHist3(nullptr)
     , contHist4(nullptr)
     , moves(buf.moves)
     , scores(buf.scores)
@@ -333,12 +336,12 @@ void MovePicker::generate_and_score_quiets()
         {
             if (contHist1)
                 sc += 2 * (*contHist1)[pt][to];
-
             if (contHist2)
                 sc += (*contHist2)[pt][to];
-
+            if (contHist3)
+                sc += (*contHist3)[pt][to] / 2;
             if (contHist4)
-                sc += (*contHist4)[pt][to] / 2;
+                sc += (*contHist4)[pt][to] / 4;
         }
 
         // Threat escape bonus/malus — uses precomputed oppThreats
