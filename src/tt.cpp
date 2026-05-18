@@ -104,6 +104,7 @@ void TT::resize(size_t mb)
     clear();
 }
 
+// Parallel clear using up to 8 threads for faster initialization on large TT sizes
 void TT::clear()
 {
     if (!table)
@@ -239,6 +240,8 @@ void TT::store(Key key,
         }
     }
 
+    // Only overwrite an existing entry if: it's an exact score, it belongs to a different position,
+    // it's from a previous search generation, or the new depth is significantly greater
     if (!(flag == TT_EXACT || replace->hashKey != key32
             || (replace->agePvBound & TT_AGE_MASK) != currentGen
             || depth + 4 + int(isPv) * 2 > replace->get_depth()))
