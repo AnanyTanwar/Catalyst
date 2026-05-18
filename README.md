@@ -1,30 +1,26 @@
-<p align="center">
-  <img src="assets/logo.png" width="180">
-</p>
-
 <h1 align="center">Catalyst</h1>
 
 <p align="center">
-  A UCI-compliant chess engine written in C++20,<br>
-  featuring NNUE evaluation and advanced search.
+  Strong UCI chess engine written in C++20<br>
+  with NNUE evaluation and advanced search
 </p>
 
 <p align="center">
   <a href="https://github.com/AnanyTanwar/Catalyst/actions/workflows/catalyst.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/AnanyTanwar/Catalyst/catalyst.yml?style=flat-square&logo=github" />
+    <img src="https://img.shields.io/github/actions/workflow/status/AnanyTanwar/Catalyst/catalyst.yml?style=for-the-badge&logo=github&label=Build">
   </a>
-  
+
   <a href="https://github.com/AnanyTanwar/Catalyst/releases/latest">
-    <img src="https://img.shields.io/github/v/release/AnanyTanwar/Catalyst?style=flat-square&logo=github&color=3b82f6" />
+    <img src="https://img.shields.io/github/v/release/AnanyTanwar/Catalyst?style=for-the-badge&logo=github&label=Release&color=3b82f6">
   </a>
 
   <a href="https://github.com/AnanyTanwar/Catalyst/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/license-GPLv3-2563eb?style=flat-square" />
+    <img src="https://img.shields.io/badge/License-GPLv3-2563eb?style=for-the-badge">
   </a>
+</p>
 
-  <a href="https://github.com/AnanyTanwar/Catalyst/commits/main">
-    <img src="https://img.shields.io/github/commits-since/AnanyTanwar/Catalyst/latest?style=flat-square&logo=git&color=f59e0b" />
-  </a>
+<p align="center">
+
 </p>
 
 ---
