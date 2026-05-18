@@ -136,7 +136,7 @@ _build: $(OBJS)
         linux-x86-64 linux-sse41 linux-avx2 linux-bmi2 linux-avx512 linux-avx512vnni \
         win-x86-64 win-sse41 win-avx2 win-bmi2 win-avx512 win-avx512vnni \
         release release-linux release-win \
-        pgo debug sanitize install clean distclean help
+        pgo debug sanitize install clean distclean format help
 
 all: net linux-x86-64
 
@@ -228,6 +228,9 @@ clean:
 distclean: clean
 	$(RM) $(NNUE_FILE)
 
+format:
+	find src -name '*.cpp' -o -name '*.h' | xargs clang-format -i
+
 help:
 	@echo ""
 	@echo "Catalyst v$(VERSION)"
@@ -247,6 +250,7 @@ help:
 	@echo "  install          install native binary to PREFIX"
 	@echo "  clean            remove build/ and bin/"
 	@echo "  distclean        clean + remove NNUE file"
+	@echo "  format           run clang-format on all source files"
 	@echo ""
 	@echo "Architectures:  native x86-64 sse41 avx2 bmi2 avx512 avx512vnni"
 	@echo ""
