@@ -16,7 +16,6 @@
 
 #include "nnue.h"
 
-#include <algorithm>
 #include <iostream>
 #ifndef NNUE_EMBEDDED
 #include <fstream>
