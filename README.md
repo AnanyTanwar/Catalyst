@@ -14,11 +14,10 @@
     <img src="https://img.shields.io/github/v/release/AnanyTanwar/Catalyst?style=for-the-badge&logo=github&label=Release&color=3b82f6">
   </a>
 
-  <a href="https://github.com/AnanyTanwar/Catalyst/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/License-GPLv3-2563eb?style=for-the-badge">
-  </a>
+<a href="https://github.com/AnanyTanwar/Catalyst/blob/main/LICENSE">
+  <img src="https://img.shields.io/badge/License-GPL--3.0-2563eb?style=for-the-badge">
+</a>
 </p>
-
 <p align="center">
 
 </p>
