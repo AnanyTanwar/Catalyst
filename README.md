@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" width="160">
+</p>
+
 <h1 align="center">Catalyst</h1>
 
 <p align="center">
@@ -14,12 +18,9 @@
     <img src="https://img.shields.io/github/v/release/AnanyTanwar/Catalyst?style=for-the-badge&logo=github&label=Release&color=3b82f6">
   </a>
 
-<a href="https://github.com/AnanyTanwar/Catalyst/blob/main/LICENSE">
-  <img src="https://img.shields.io/badge/License-GPL--3.0-2563eb?style=for-the-badge">
-</a>
-</p>
-<p align="center">
-
+  <a href="https://github.com/AnanyTanwar/Catalyst/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/License-GPL--3.0-2563eb?style=for-the-badge">
+  </a>
 </p>
 
 ---
