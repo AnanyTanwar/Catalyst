@@ -349,6 +349,7 @@ Key Board::compute_pawn_key() const
 
 Key Board::compute_non_pawn_key(Color c) const
 {
+    // Hash all non-pawn pieces of one color. Used for correction history indexing.
     Key k = 0;
     for (PieceType pt : { KNIGHT, BISHOP, ROOK, QUEEN, KING })
     {
@@ -364,6 +365,8 @@ Key Board::compute_non_pawn_key(Color c) const
 
 template <bool AfterMove> Key Board::compute_key() const
 {
+    // Full Zobrist hash from scratch. AfterMove=true includes side-to-move toggle (used
+    // internally).
     Key      k   = 0;
     Bitboard occ = pieces();
     while (occ)
@@ -384,6 +387,8 @@ template Key Board::compute_key<true>() const;
 
 void Board::make_move(Move m, StateInfo &newSt)
 {
+    // Execute a legal move and push new state. All updates are incremental XOR operations on
+    // Zobrist keys. The move is assumed legal (validated by is_legal() in move generation).
     if (!pieces(KING, WHITE) || !pieces(KING, BLACK))
     {
         std::cerr << "FATAL: make_move called with missing king! move=" << move_to_uci(m)
