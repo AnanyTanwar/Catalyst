@@ -30,6 +30,9 @@
 
 namespace Catalyst {
 
+// LMR (Late Move Reduction) lookup table parameters.
+// LMRTable[quiet/noisy][depth][moveCount] stores fractional reductions in 1/1024 units.
+// Indexed by [isQuiet ? 1 : 0][std::min(depth,63)][std::min(moveCount,63)].
 inline constexpr double LMR_QUIET_BASE      = 0.77;
 inline constexpr double LMR_QUIET_SCALE     = 0.40;
 inline constexpr double LMR_NOISY_BASE      = 0.10;
@@ -40,52 +43,69 @@ inline constexpr int    LMR_HIST_QUIET_DIV  = 8192;
 inline constexpr int    LMR_HIST_NOISY_DIV  = 12288;
 inline constexpr int    LMR_TTPV_REDUCTION  = 2;
 
+// Aspiration window: start with a narrow window around previous iteration's score,
+// widen geometrically on fail-low/fail-high until full-window search.
 inline constexpr double ASP_BETA_LERP  = 0.25;
 inline constexpr int    ASP_INIT_DELTA = 16;
 inline constexpr int    ASP_MAX_DELTA  = 500;
 
+// Reverse Futility Pruning: skip nodes where static eval is so far above beta that
+// even with a margin the opponent cannot realistically challenge.
 inline constexpr int RFP_MARGIN_MULT = 77;
 inline constexpr int RFP_HIST_DIV    = 512;
 inline constexpr int RFP_MAX_DEPTH   = 16;
 
+// Null Move Pruning: if we can pass and still be above beta, the position is too good.
+// Verification search avoids zugzwang false positives.
 inline constexpr int NMP_BASE_R      = 3;
 inline constexpr int NMP_BETA_BASE   = 150;
 inline constexpr int NMP_BETA_MULT   = 15;
 inline constexpr int NMP_EVAL_DIV    = 200;
 inline constexpr int NMP_VERIF_DEPTH = 16;
 
+// ProbCut: high-beta pruning using a shallow search on captures that look strong enough.
 inline constexpr int PROBCUT_MARGIN = 190;
 inline constexpr int PROBCUT_DEPTH  = 5;
 inline constexpr int PROBCUT_MAX    = 5;
 
+// Singular Extension: if TT move is significantly better than all others, extend search depth.
+// Double/triple extension for overwhelmingly singular moves (capped to avoid explosion).
 inline constexpr int SE_DEPTH         = 6;
 inline constexpr int SE_DOUBLE_MARGIN = 13;
 inline constexpr int SE_TRIPLE_MARGIN = 86;
 
+// Futility pruning: skip quiet moves when static eval + margin still fails below alpha.
 inline constexpr int FUTILITY_BASE  = 42;
 inline constexpr int FUTILITY_MULT  = 120;
 inline constexpr int FUTILITY_MAX_D = 13;
 
+// SEE (Static Exchange Evaluation) thresholds for pruning captures/quiets by move count.
 inline constexpr int SEE_QUIET_THRESH = -64;
 inline constexpr int SEE_NOISY_THRESH = -20;
 
+// Late Move Pruning: skip remaining quiets after move count exceeds depth-dependent threshold.
 inline constexpr int LMP_BASE      = 3;
 inline constexpr int LMP_MAX_DEPTH = 8;
 
+// History-based pruning: skip quiets with very negative history scores at low depths.
 inline constexpr int HIST_PRUNE_MULT  = 4096;
 inline constexpr int HIST_PRUNE_DEPTH = 4;
 
+// Delta pruning in quiescence: if stand-pat + best possible capture still below alpha, cutoff.
 inline constexpr int    DELTA_MARGIN     = 200;
 inline constexpr double QS_CUTOFF_LERP   = 0.50;
 inline constexpr double QS_FAILHIGH_LERP = 0.50;
 
+// Scale eval toward draw as 50-move rule approaches to avoid overestimating dead positions.
 inline constexpr int FIFTY_SCALE_NUM = 220;
 
+// Zero-window search (ZWS) re-search margins: deeper if score way above best, shallower if barely.
 inline constexpr int ZWS_DEEPER_MARGIN    = 50;
 inline constexpr int ZWS_SHALLOWER_MARGIN = 9;
 
 inline constexpr int LMR_ALPHA_RAISE_SCALE = LMR_FRAC / 2;
 
+// Reduce depth on alpha-raise to spend more time on interesting lines, less on quiet ones.
 inline constexpr int ALPHA_RAISE_DEPTH_MIN = 5;
 inline constexpr int ALPHA_RAISE_DEPTH_MAX = 9;
 
@@ -103,6 +123,7 @@ void       init_lmr();
 static_assert(LMR_FRAC == 1024, "LMR_FRAC should be 1024");
 
 struct SearchStack {
+    // Bitboard of all squares attacked by opponent; used for threat-aware history indexing
     Bitboard             threats          = 0;
     Move                *pv               = nullptr;
     Move                 move             = MOVE_NONE;
@@ -217,7 +238,8 @@ private:
         Move           excludedMove = MOVE_NONE);
     int quiescence(Board &board, int alpha, int beta, int ply);
 
-    int  adjusted_eval(const Board &board, int ply);
+    int adjusted_eval(const Board &board, int ply);
+    // Update all correction history tables after a search completes (if not tactical cutoff).
     void update_correction(const Board &board,
         int                             ply,
         int                             staticEval,
@@ -245,9 +267,11 @@ private:
         PieceType                              movedPt,
         PieceType                              capturedPt,
         Bitboard                               threats) const;
-    void              update_killers(Move m, int ply);
-    void              update_counter(Color us, Move prevMove, Move reply);
-    void              update_quiet_histories(const Board &board,
+    // Killer moves: recent quiet cutoffs at this ply, used for move ordering.
+    void update_killers(Move m, int ply);
+    void update_counter(Color us, Move prevMove, Move reply);
+    // Update all quiet history tables for best move (bonus) and tried moves (malus).
+    void update_quiet_histories(const Board &board,
         Color                                us,
         Move                                 bestMove,
         PieceType                            bestPt,
@@ -257,7 +281,7 @@ private:
         int                                  triedCount,
         Bitboard                             threats,
         bool                                 improving);
-    void              update_capture_histories(const Board &board,
+    void update_capture_histories(const Board &board,
         Color                                  us,
         Move                                   bestMove,
         PieceType                              bestPt,
@@ -275,11 +299,13 @@ private:
     }
 
     bool is_valid_tt_move(const Board &board, Move m) const;
+    // True if opponent has any capture with SEE >= 0
     bool opponent_has_winning_capture(const Board &board) const;
     bool is_shuffling(Move m, int ply) const;
 
     int draw_score() const { return 4 - int(info_.nodes & 3); }
 
+    // Integer linear interpolation — used to soften pruning return values.
     static int ilerp(int a, int b, double t) { return int(a + t * double(b - a)); }
 
     static bool is_mate_score(int s) { return std::abs(s) >= SCORE_MATE_IN_MAX_PLY; }
