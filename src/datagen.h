@@ -51,7 +51,7 @@ namespace Datagen {
         int16_t  score;
 
         static ViriMove from_move(Move m, int score);
-        static ViriMove sentinel() { return { 0, 0 }; }
+        static ViriMove sentinel() { return { 0xFFFF, 0 }; }
     };
     static_assert(sizeof(ViriMove) == 4, "ViriMove must be exactly 4 bytes");
 
