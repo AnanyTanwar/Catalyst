@@ -190,7 +190,7 @@ void UCI::cmd_ucinewgame()
 
 void UCI::cmd_position(std::istringstream &iss)
 {
-    pool_->stop();
+    pool_->stop_search();
     join_search();
     moveHistoryCount = 0;
     std::string token;
@@ -220,7 +220,7 @@ void UCI::cmd_position(std::istringstream &iss)
 
 void UCI::cmd_go(std::istringstream &iss)
 {
-    pool_->stop();
+    pool_->stop_search();
     join_search();
 
     SearchLimits limits;
@@ -334,7 +334,7 @@ void UCI::cmd_ponderhit()
 
 void UCI::cmd_stop()
 {
-    pool_->stop();
+    pool_->stop_search();
     join_search();
 }
 
