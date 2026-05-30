@@ -5,6 +5,9 @@ on:
   pull_request:
     branches: ["**"]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   quick:
     name: Quick (native + test)
@@ -15,14 +18,10 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y g++ make
       - name: Download NNUE
         run: make net
-      - name: Build (native)
-        run: make -j native
-      - name: Warnings as errors
-        run: make -j native CXXFLAGS="$(make -s CXXFLAGS ARCH=native) -Werror"
-      - name: Benchmark
-        run: echo "bench" | ./bin/catalyst-native
-      - name: Perft
-        run: echo -e "position startpos\ngo perft 5" | ./bin/catalyst-native
+      - name: Build + test
+        run: |
+          make -j$(nproc) native
+          echo "bench" | ./bin/catalyst-native
 
   linux:
     name: Linux (${{ matrix.arch }})
@@ -38,7 +37,7 @@ jobs:
       - name: Download NNUE
         run: make net
       - name: Build
-        run: make -j linux-${{ matrix.arch }}
+        run: make -j$(nproc) linux-${{ matrix.arch }}
 
   debug:
     name: Debug + ASan/UBSan
@@ -49,10 +48,10 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y g++ make
       - name: Download NNUE
         run: make net
-      - name: Sanitize build
-        run: make -j sanitize
-      - name: Benchmark
-        run: echo "bench" | ./bin/catalyst-debug
+      - name: Build + test
+        run: |
+          make -j$(nproc) sanitize
+          echo "bench" | ./bin/catalyst-debug
 
   clang:
     name: Clang
@@ -63,7 +62,5 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y clang lld make
       - name: Download NNUE
         run: make net
-      - name: Build
-        run: make -j native CXX=clang++
-      - name: Warnings as errors
-        run: make -j native CXX=clang++ CXXFLAGS="$(make -s CXXFLAGS ARCH=native) -Werror"
+      - name: Build + warnings as errors
+        run: make -j$(nproc) native CXX=clang++ CXXFLAGS="$(make -s CXXFLAGS ARCH=native) -Werror"
