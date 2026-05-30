@@ -25,20 +25,14 @@
 
 namespace Catalyst {
 
-// Depth stored as uint8_t with offset so QS depths (negative) are representable.
-// Occupancy is determined by hashKey != 0, not by depth, so depth=0 is a valid stored depth.
+// Depth stored with offset so QS depths (negative) are representable.
 constexpr int TT_DEPTH_OFFSET = 7;
 
 // agePvBound layout: [age: 5 bits | isPv: 1 bit | flag: 2 bits]
-// Age increments by TT_AGE_INC each new_search() so the lower 3 bits stay free.
-constexpr uint8_t TT_AGE_INC   = 8;
-constexpr uint8_t TT_AGE_MASK  = 0xF8;
-constexpr int     TT_AGE_CYCLE = 256;
-
-// Number of age generations one depth unit is worth in the replacement formula.
-// Normalises age (in raw units of TT_AGE_INC) so that each generation == this many depth units.
-// Chosen so ~4 generations old ≈ surrendering 8 depth → aggressively evict stale entries.
-constexpr int TT_AGE_WEIGHT = TT_AGE_CYCLE / TT_AGE_INC;  // 32
+constexpr uint8_t TT_AGE_INC    = 8;
+constexpr uint8_t TT_AGE_MASK   = 0xF8;
+constexpr int     TT_AGE_CYCLE  = 256;
+constexpr int     TT_AGE_WEIGHT = TT_AGE_CYCLE / TT_AGE_INC;  // 32
 
 enum TTFlag : uint8_t {
     TT_NONE  = 0,
@@ -47,9 +41,8 @@ enum TTFlag : uint8_t {
     TT_UPPER = 3
 };
 
-// 16 bytes per entry × 4 entries per cluster = one 64-byte cache line per cluster.
-// hashKey: upper 32 bits of the Zobrist key (lower 32 used for cluster indexing).
-// Occupancy is signalled by hashKey != 0 (a zero key is astronomically rare; treat as empty).
+// 16 bytes × 4 entries = one 64-byte cache line per cluster.
+// Occupancy signalled by hashKey != 0.
 struct TTEntry {
     uint32_t hashKey;
     uint16_t move;
@@ -78,9 +71,7 @@ struct alignas(64) TTCluster {
 
 static_assert(sizeof(TTCluster) == 64, "TTCluster must be 64 bytes");
 
-// Snapshot of a probed entry returned by value — safe to read after store() is called.
-// Separating the read snapshot from the write pointer (TTWriter) keeps the interface clean
-// and ensures search code never accidentally reads through a stale/overwritten pointer.
+// Snapshot returned by probe() — safe to read after store().
 struct TTData {
     Move   move;
     int    score;
@@ -91,9 +82,7 @@ struct TTData {
     bool   is_pv;
 };
 
-// Thin write handle returned alongside TTData by probe().
-// Storing through TTWriter instead of a raw TTEntry* makes the write boundary explicit
-// and will be trivially correct when SMP is added.
+// Write handle returned alongside TTData by probe().
 struct TTWriter {
     void save(Key key,
         int       score,
@@ -124,19 +113,16 @@ public:
     void new_search();
     void prefetch(Key key) const;
 
-    // Returns {hit, data_snapshot, writer}.
-    // On hit:  data_snapshot holds a copy of the matching entry; writer points to it.
-    // On miss: data_snapshot is zeroed; writer points to the best replacement candidate.
-    // The age of a hit entry is refreshed transparently via the writer on the next store().
     [[nodiscard]] std::tuple<bool, TTData, TTWriter> probe(Key key) const;
-
-    [[nodiscard]] int hashfull() const;
+    [[nodiscard]] int                                hashfull() const;
 
     uint8_t generation() const { return currentGen; }
 
 private:
     TTCluster *table       = nullptr;
     size_t     numClusters = 0;
+    size_t     tableBytes  = 0;  // actual allocated size (may be rounded up for huge pages)
+    bool       tableMmap   = false;
     uint8_t    currentGen  = 0;
 
     [[nodiscard]] FORCE_INLINE size_t index(Key key) const
@@ -156,15 +142,13 @@ private:
 #endif
     }
 
-    // Replacement score: higher = more valuable = less likely to be evicted.
-    // Age is normalised by TT_AGE_WEIGHT so each generation costs as many points as
-    // TT_AGE_WEIGHT depth units, making stale entries lose out heavily to fresh ones.
     [[nodiscard]] FORCE_INLINE int replacement_score(const TTEntry &e) const
     {
         const int age = (TT_AGE_CYCLE + currentGen - (e.agePvBound & TT_AGE_MASK)) & TT_AGE_MASK;
-
         return int(e.depth) - age * TT_AGE_WEIGHT / TT_AGE_INC;
     }
+
+    void free_table();
 };
 
 extern TT tt;
