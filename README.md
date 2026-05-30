@@ -1,33 +1,28 @@
-<p align="center">
-  <img src="assets/logo.png" width="200">
-</p>
-
 <h1 align="center">Catalyst</h1>
+
+<div align="center">
+
+[![Build][build-badge]][build-link]
+[![Release][release-badge]][release-link]
+[![License][license-badge]][license-link]
+
+</div>
 
 <p align="center">
   Strong UCI chess engine written in C++20<br>
   with NNUE evaluation and advanced search
 </p>
 
-<p align="center">
-  <a href="https://github.com/AnanyTanwar/Catalyst/actions/workflows/catalyst.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/AnanyTanwar/Catalyst/catalyst.yml?style=for-the-badge&logo=github&label=Build">
-  </a>
-
-  <a href="https://github.com/AnanyTanwar/Catalyst/releases/latest">
-    <img src="https://img.shields.io/github/v/release/AnanyTanwar/Catalyst?style=for-the-badge&logo=github&label=Release&color=3b82f6">
-  </a>
-
-  <a href="https://github.com/AnanyTanwar/Catalyst/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/License-GPL--3.0-2563eb?style=for-the-badge">
-</a>
-</p>
-
-<br>
-
 ---
 
 Catalyst uses a `(768 → 256)×2 → 8` neural network with incremental accumulator updates and SIMD-accelerated inference (SSE4.1 / AVX2 / AVX-512), combined with a robust search implementation including PVS, Lazy SMP, and an extensive suite of pruning, extension, and reduction techniques.
+
+[build-badge]:https://img.shields.io/github/actions/workflow/status/AnanyTanwar/Catalyst/catalyst.yml?style=flat-square&logo=github&label=Build
+[build-link]:https://github.com/AnanyTanwar/Catalyst/actions/workflows/catalyst.yml
+[release-badge]:https://img.shields.io/github/v/release/AnanyTanwar/Catalyst?style=flat-square&logo=github&label=Release&color=3b82f6
+[release-link]:https://github.com/AnanyTanwar/Catalyst/releases/latest
+[license-badge]:https://img.shields.io/badge/License-GPL--3.0-2563eb?style=flat-square
+[license-link]:https://github.com/AnanyTanwar/Catalyst/blob/main/LICENSE
 
 ## Strength
 
