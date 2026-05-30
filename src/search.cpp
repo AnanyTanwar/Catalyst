@@ -29,6 +29,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <tuple>
 
 namespace Catalyst {
 
