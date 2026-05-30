@@ -161,54 +161,70 @@ Choose the binary that matches your CPU's highest supported instruction set:
 
 ## Building from Source
 
-Requires `make`, a C++20 compiler (GCC ≥ 13 or Clang ≥ 16), and `objcopy`. The Makefile will automatically download the NNUE file and embed it into the binary.
+Requires a C++20 compiler (GCC ≥ 13 or Clang ≥ 16) and `objcopy`. The NNUE weights are downloaded and embedded automatically at build time.
 
 ```bash
-# Clone the repository
 git clone https://github.com/AnanyTanwar/Catalyst
 cd Catalyst
+```
 
-# Build optimised for the host CPU (recommended for local use)
+### Make
+
+```bash
+# Build optimised for the host CPU (recommended)
 make native
 
 # Build a specific architecture
-make linux-x86-64
-make linux-sse41
 make linux-avx2
 make linux-bmi2
 make linux-avx512
 make linux-avx512vnni
+make linux-sse41
+make linux-x86-64
 
-# Build all Linux release binaries
-make release-linux
+# Release builds
+make release-linux                        # all Linux binaries
+make release-win                          # all Windows binaries (requires MinGW)
 
-# Build all Windows release binaries (requires MinGW cross-compiler)
-make release-win
-
-# Build with PGO (profile-guided optimisation)
-make pgo                  # native CPU
+# PGO (profile-guided optimisation)
+make pgo                                  # native CPU
 make pgo ARCH=avx2
-make pgo ARCH=bmi2
-make pgo ARCH=sse41
-make pgo ARCH=avx512
 
-# Install to system
-make install              # installs to /usr/local/bin
-make install PREFIX=/usr  # custom prefix
-
-# Debug build
+# Debug / sanitizers
 make debug
-make sanitize             # debug + ASan + UBSan
-make debug SANITIZE=-fsanitize=address,undefined
+make sanitize                             # ASan + UBSan
 
-# Clean build artifacts
+# Install
+make install                              # /usr/local/bin
+make install PREFIX=/usr
+
+# Clean
 make clean
-
-# Clean build artifacts and downloaded NNUE file
-make distclean
+make distclean                            # also removes NNUE file
 ```
 
-All binaries are placed in `bin/`.
+### CMake
+
+Requires CMake ≥ 3.16.
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+
+# Build a specific architecture (native is on by default)
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_NATIVE=ON -DBUILD_AVX2=ON
+cmake --build build -j
+
+# PGO — two-pass
+cmake -B build-pgo-gen -DCMAKE_BUILD_TYPE=Release -DCATALYST_PGO_GEN=ON
+cmake --build build-pgo-gen -j
+./build-pgo-gen/catalyst-native bench
+
+cmake -B build-pgo -DCMAKE_BUILD_TYPE=Release -DCATALYST_PGO_USE=ON
+cmake --build build-pgo -j
+```
+
+All binaries are placed in `bin/` (Make) or the build directory (CMake).
 
 ---
 
