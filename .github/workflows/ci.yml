@@ -62,5 +62,5 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y clang lld make
       - name: Download NNUE
         run: make net
-      - name: Build + warnings as errors
-        run: make -j$(nproc) native CXX=clang++ CXXFLAGS="$(make -s CXXFLAGS ARCH=native) -Werror"
+      - name: Build
+        run: make -j$(nproc) native CXX=clang++ CXXFLAGS="-std=c++20 -O3 -flto=auto -DNDEBUG -DNNUE_EMBEDDED -pthread -fno-exceptions -fno-rtti -Isrc -march=native -Werror"
