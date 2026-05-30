@@ -38,40 +38,33 @@ namespace Catalyst {
 
 TT tt;
 
-namespace {
+constexpr size_t HUGE_PAGE = 2 * 1024 * 1024;  // 2MB
 
-    void *alloc_aligned(size_t size)
-    {
+// Round up to huge page boundary.
+static size_t round_to_huge(size_t size)
+{
+    return (size + HUGE_PAGE - 1) / HUGE_PAGE * HUGE_PAGE;
+}
+
+void TT::free_table()
+{
+    if (!table)
+        return;
+
 #if defined(USE_MADVISE)
-        constexpr size_t alignment = 2 * 1024 * 1024;
-        const size_t     padded    = (size + alignment - 1) / alignment * alignment;
-        void            *mem       = nullptr;
-        if (posix_memalign(&mem, alignment, padded) != 0)
-            mem = nullptr;
-        if (mem)
-            madvise(mem, padded, MADV_HUGEPAGE);
-        return mem;
+    if (tableMmap)
+        munmap(table, tableBytes);
+    else
+        free(table);
 #elif defined(_WIN32)
-        return _aligned_malloc(size, 64);
+    _aligned_free(table);
 #else
-        constexpr size_t alignment = 64;
-        const size_t     padded    = (size + alignment - 1) / alignment * alignment;
-        void            *mem       = nullptr;
-        if (posix_memalign(&mem, alignment, padded) != 0)
-            mem = nullptr;
-        return mem;
+    free(table);
 #endif
-    }
 
-    void free_aligned(void *ptr)
-    {
-#if defined(_WIN32)
-        _aligned_free(ptr);
-#else
-        free(ptr);
-#endif
-    }
-
+    table      = nullptr;
+    tableMmap  = false;
+    tableBytes = 0;
 }
 
 TT::TT()
@@ -81,23 +74,64 @@ TT::TT()
 
 TT::~TT()
 {
-    free_aligned(table);
-    table = nullptr;
+    free_table();
 }
 
 void TT::resize(size_t mb)
 {
     mb = std::max(mb, size_t(1));
 
-    free_aligned(table);
-    table = nullptr;
+    free_table();
 
-    const size_t bytes = mb * 1024 * 1024;
-    numClusters        = bytes / sizeof(TTCluster);
-    if (numClusters == 0)
-        numClusters = 1;
+    const size_t requested = mb * 1024 * 1024;
 
-    table = reinterpret_cast<TTCluster *>(alloc_aligned(numClusters * sizeof(TTCluster)));
+#if defined(USE_MADVISE)
+    const size_t padded = round_to_huge(requested);
+
+    // Try explicit huge pages (MAP_HUGETLB) — guaranteed 2MB pages.
+    void *mem = mmap(nullptr,
+        padded,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB,
+        -1,
+        0);
+
+    if (mem != MAP_FAILED)
+    {
+        table      = reinterpret_cast<TTCluster *>(mem);
+        tableBytes = padded;
+        tableMmap  = true;
+    }
+    else
+    {
+        // THP fallback — kernel promotes pages when it can.
+        mem = nullptr;
+        if (posix_memalign(&mem, HUGE_PAGE, padded) == 0)
+        {
+            madvise(mem, padded, MADV_HUGEPAGE);
+            table      = reinterpret_cast<TTCluster *>(mem);
+            tableBytes = padded;
+            tableMmap  = false;
+        }
+    }
+
+    // Use all the rounded-up space.
+    numClusters = tableBytes / sizeof(TTCluster);
+
+#elif defined(_WIN32)
+    table       = reinterpret_cast<TTCluster *>(_aligned_malloc(requested, 64));
+    tableBytes  = requested;
+    tableMmap   = false;
+    numClusters = requested / sizeof(TTCluster);
+#else
+    const size_t padded = round_to_huge(requested);
+    void        *mem    = nullptr;
+    if (posix_memalign(&mem, 64, padded) == 0)
+        table = reinterpret_cast<TTCluster *>(mem);
+    tableBytes  = padded;
+    tableMmap   = false;
+    numClusters = padded / sizeof(TTCluster);
+#endif
 
     if (!table)
     {
@@ -105,6 +139,9 @@ void TT::resize(size_t mb)
         resize(mb / 2);
         return;
     }
+
+    if (numClusters == 0)
+        numClusters = 1;
 
     clear();
 }
@@ -182,9 +219,8 @@ std::tuple<bool, TTData, TTWriter> TT::probe(Key key) const
     {
         TTEntry &e = cluster->entries[i];
         if (!e.is_occupied())
-        {
             return { false, TTData { }, TTWriter(&e) };
-        }
+
         const int s = replacement_score(e);
         if (s < worstScore)
         {
