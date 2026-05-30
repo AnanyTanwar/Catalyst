@@ -4,21 +4,66 @@ on:
     branches: ["**"]
   pull_request:
     branches: ["**"]
+
 jobs:
-  build:
-    name: Build (${{ matrix.arch }})
+  quick:
+    name: Quick (native + test)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update -q && sudo apt-get install -y g++ make
+      - name: Download NNUE
+        run: make net
+      - name: Build (native)
+        run: make -j native
+      - name: Warnings as errors
+        run: make -j native CXXFLAGS="$(make -s CXXFLAGS ARCH=native) -Werror"
+      - name: Benchmark
+        run: echo "bench" | ./bin/catalyst-native
+      - name: Perft
+        run: echo -e "position startpos\ngo perft 5" | ./bin/catalyst-native
+
+  linux:
+    name: Linux (${{ matrix.arch }})
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86-64, avx2]
+        arch: [x86-64, sse41, avx2, bmi2, avx512, avx512vnni]
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y g++ make binutils
+        run: sudo apt-get update -q && sudo apt-get install -y g++ make
       - name: Download NNUE
         run: make net
       - name: Build
-        run: make linux-${{ matrix.arch }}
+        run: make -j linux-${{ matrix.arch }}
+
+  debug:
+    name: Debug + ASan/UBSan
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update -q && sudo apt-get install -y g++ make
+      - name: Download NNUE
+        run: make net
+      - name: Sanitize build
+        run: make -j sanitize
+      - name: Benchmark
+        run: echo "bench" | ./bin/catalyst-debug
+
+  clang:
+    name: Clang
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update -q && sudo apt-get install -y clang lld make
+      - name: Download NNUE
+        run: make net
+      - name: Build
+        run: make -j native CXX=clang++
+      - name: Warnings as errors
+        run: make -j native CXX=clang++ CXXFLAGS="$(make -s CXXFLAGS ARCH=native) -Werror"
