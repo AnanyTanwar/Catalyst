@@ -30,58 +30,63 @@
 
 namespace Catalyst {
 
+// Manages a pool of search threads for SMP (symmetric multiprocessing) search.
+// Thread 0 is the "main" thread — it outputs info and provides the best move.
 class ThreadPool {
 public:
-    std::atomic<bool> stop { false };
+    std::atomic<bool> stop { false };  // signals all threads to stop searching
 
     explicit ThreadPool(int numThreads = 1);
     ~ThreadPool();
 
+    // Resize the pool, cleanly stopping and restarting all workers.
     void set_threads(int n);
 
+    // Start a parallel search and block until thread 0 finishes, then return the best move.
     Move search(Board &board, TimeManager &tm);
 
-    void stop_search();
+    void stop_search();    // request an early stop (sets stop = true)
+    void wait_for_idle();  // block until all workers finish their current search
 
-    void wait_for_idle();
+    void clear_all();  // reset search history tables across all threads
 
-    void clear_all();
-
-    uint64_t total_nodes() const;
+    uint64_t total_nodes() const;  // sum of nodes searched across all threads
 
     Move ponder_move() const;
 
-    int thread_count() const { return static_cast<int>(workers_.size()); }
-
+    int     thread_count() const { return static_cast<int>(workers_.size()); }
     Search &main_search() { return *workers_[0]->searcher; }
 
 private:
+    // Per-thread state: each worker owns its own searcher, board copy, and OS thread.
     struct Worker {
         std::unique_ptr<Search> searcher;
-        std::unique_ptr<Board>  board;
+        std::unique_ptr<Board>  board;  // local copy of the root position
 
         std::mutex              mutex;
         std::condition_variable cv;
 
-        bool searching = false;
-        bool exiting   = false;
+        bool searching = false;  // true while the worker is actively searching
+        bool exiting   = false;  // true when the pool is being torn down
 
         std::unique_ptr<std::thread> thread;
     };
 
     std::vector<std::unique_ptr<Worker>> workers_;
 
-    std::atomic<uint64_t> sharedNodes_ { 0 };
+    std::atomic<uint64_t> sharedNodes_ { 0 };  // node counter shared across all threads
 
     Board       *rootBoard_ = nullptr;
     TimeManager *rootTm_    = nullptr;
 
+    // Used to wake the UCI thread once thread 0 finishes.
     std::mutex              mainMutex_;
     std::condition_variable mainCv_;
 
-    void spawn_worker(int idx);
-    void idle_loop(int idx);
+    void spawn_worker(int idx);  // create and start a single worker thread
+    void idle_loop(int idx);     // worker thread entry point — waits then searches
 
+    // Pick the thread that searched deepest as the source of the best move.
     const Search *best_thread() const;
 };
 
