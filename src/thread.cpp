@@ -28,11 +28,12 @@ ThreadPool::ThreadPool(int numThreads)
 
 ThreadPool::~ThreadPool()
 {
+    // Signal all workers to exit, then wake and join them.
     for (auto &w : workers_)
     {
         std::lock_guard<std::mutex> lock(w->mutex);
         w->exiting   = true;
-        w->searching = true;
+        w->searching = true; // unblocks the cv.wait in idle_loop
     }
     for (auto &w : workers_)
         w->cv.notify_all();
@@ -49,6 +50,7 @@ void ThreadPool::set_threads(int n)
     {
         wait_for_idle();
 
+        // Tear down existing workers before rebuilding.
         for (auto &w : workers_)
         {
             {
@@ -76,11 +78,13 @@ void ThreadPool::spawn_worker(int idx)
     w->searcher = std::make_unique<Search>(idx, &stop);
     w->board    = std::make_unique<Board>();
 
+    // Only thread 0 prints UCI output; helpers run silently.
     w->searcher->isSilent = (idx != 0);
 
     w->thread = std::make_unique<std::thread>([this, idx]() { idle_loop(idx); });
 }
 
+// Worker thread entry point. Sleeps until a search is requested, runs it, then sleeps again.
 void ThreadPool::idle_loop(int idx)
 {
     Worker &w = *workers_[idx];
@@ -103,6 +107,7 @@ void ThreadPool::idle_loop(int idx)
         }
         w.cv.notify_all();
 
+        // Thread 0 also wakes the UCI caller waiting in search().
         if (idx == 0)
         {
             std::lock_guard<std::mutex> lg(mainMutex_);
@@ -125,9 +130,9 @@ Move ThreadPool::search(Board &board, TimeManager &tm)
     wait_for_idle();
 
     stop.store(false, std::memory_order_seq_cst);
-
     sharedNodes_.store(0, std::memory_order_relaxed);
 
+    // Give every worker a fresh copy of the root position.
     for (auto &w : workers_)
         w->board->copy_from(board);
 
@@ -135,6 +140,7 @@ Move ThreadPool::search(Board &board, TimeManager &tm)
     for (auto &w : workers_)
         w->searcher->sharedNodes_ = &sharedNodes_;
 
+    // Wake all workers simultaneously.
     for (auto &w : workers_)
     {
         std::lock_guard<std::mutex> lock(w->mutex);
@@ -143,13 +149,14 @@ Move ThreadPool::search(Board &board, TimeManager &tm)
     for (auto &w : workers_)
         w->cv.notify_all();
 
+    // Block the UCI thread until thread 0 finishes (it will signal mainCv_).
     {
         std::unique_lock<std::mutex> lock(mainMutex_);
         mainCv_.wait(lock, [this] { return !workers_[0]->searching; });
     }
 
+    // Tell remaining threads to stop and wait for them to settle.
     stop.store(true, std::memory_order_seq_cst);
-
     wait_for_idle();
 
     for (auto &w : workers_)
@@ -158,6 +165,7 @@ Move ThreadPool::search(Board &board, TimeManager &tm)
     return best_thread()->best_move_result();
 }
 
+// Return the searcher that reached the greatest depth — its move is most trustworthy.
 const Search *ThreadPool::best_thread() const
 {
     const Search *best = workers_[0]->searcher.get();
