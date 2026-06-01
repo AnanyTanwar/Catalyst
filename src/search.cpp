@@ -1,5 +1,5 @@
 // Catalyst is a UCI compliant chess engine
-// Copyright (C) 2026 Anany Tanwar
+//  Copyright (C) 2026 Anany Tanwar
 
 // Catalyst is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -29,7 +29,6 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
-#include <tuple>
 
 namespace Catalyst {
 
@@ -37,8 +36,8 @@ int LMRTable[2][64][64];
 
 void init_lmr()
 {
-    // Precompute LMR reductions: base + scale * log(depth) * log(moveCount)
-    //  Quiet moves reduced more aggressively than noisy (captures/promotions).
+    // base + scale * log(depth) * log(moveCount)
+    // Quiet moves reduced more aggressively than noisy ones.
     for (int d = 1; d < 64; ++d)
         for (int m = 1; m < 64; ++m)
         {
@@ -48,7 +47,9 @@ void init_lmr()
         }
 }
 
-Search::Search()
+Search::Search(int threadIdx, std::atomic<bool> *poolStop)
+    : threadIdx_(threadIdx)
+    , poolStop_(poolStop)
 {
     init_lmr();
     clear_tables();
@@ -56,7 +57,8 @@ Search::Search()
 
 void Search::clear_tables()
 {
-    // Full reset of all heuristic tables. Called on ucinewgame, NOT between moves.
+    // Full reset of all heuristic tables. Called on ucinewgame, NOT between moves —
+    // we want history to persist across moves within a game.
     std::memset(history_, 0, sizeof(history_));
     std::memset(pieceToHistory_, 0, sizeof(pieceToHistory_));
     std::memset(captureHistory_, 0, sizeof(captureHistory_));
@@ -70,9 +72,7 @@ void Search::clear_tables()
     std::memset(corrNonPawnBlack_, 0, sizeof(corrNonPawnBlack_));
     std::memset(contCorr_, 0, sizeof(contCorr_));
     for (auto &pv : pvTable_)
-    {
         pv.length = 0;
-    }
     for (auto &s : stack_)
         s = SearchStack { };
     nmpMinPly_ = 0;
@@ -80,11 +80,11 @@ void Search::clear_tables()
 }
 
 // ---------------------------------------------------------------------------
-// TT move validation — guards against hash collisions producing garbage moves
+// TT move validation
 // ---------------------------------------------------------------------------
 bool Search::is_valid_tt_move(const Board &board, Move m) const
 {
-    // Fast rejection of obviously corrupted TT moves before legality test.
+    // Fast rejection of obviously corrupted TT moves before the expensive legality test.
     if (m == MOVE_NONE)
         return false;
     Square from = from_sq(m);
@@ -108,8 +108,8 @@ bool Search::is_valid_tt_move(const Board &board, Move m) const
 // ---------------------------------------------------------------------------
 int Search::quiet_hist_score(const Board &board, Color us, Move m, PieceType movedPt, int ply) const
 {
-    // Aggregate of butterfly, piece-to, pawn, and continuation histories (ply-1 to ply-4).
-    // Higher = historically good move; lower = historically bad.
+    // Sum of butterfly, piece-to, pawn, and continuation histories (ply-1 to ply-4).
+    // Continuation entries at deeper plies are down-weighted since they're less relevant.
     int butterfly
         = history_[us][from_sq(m)][to_sq(m)][threat_index(from_sq(m), to_sq(m), ss(ply)->threats)];
     int pieceTo = pieceToHistory_[us][movedPt][to_sq(m)]
@@ -140,6 +140,7 @@ int Search::capture_hist_score(Color us,
 
 void Search::update_killers(Move m, int ply)
 {
+    // Shift register: newest killer always goes into slot 0.
     if (killers_[ply][0] == m)
         return;
     killers_[ply][1] = killers_[ply][0];
@@ -162,8 +163,7 @@ void Search::update_quiet_histories(const Board &board,
     int                                          triedCount,
     Bitboard                                     threats,
     bool                                         improving)
-{  // Update quiet histories with gravity. Best move gets bonus, all tried quiets get malus.
-    // Continuation history uses a "bestBase" normalization to avoid over-updating.
+{
     int                  bonus = stat_bonus(histDepth);
     int                  malus = -stat_malus(histDepth);
     int                  phIdx = pawn_history_index(board.pawn_key());
@@ -173,6 +173,7 @@ void Search::update_quiet_histories(const Board &board,
     ContinuationHistory *ch3   = (cur - 3)->contHistEntry;
     ContinuationHistory *ch4   = (cur - 4)->contHistEntry;
 
+    // Slightly larger bonus when eval is improving — the move was probably extra good.
     int scaledBonus = improving ? bonus * 5 / 4 : bonus;
 
     gravity(history_[us][from_sq(bestMove)][to_sq(bestMove)]
@@ -185,7 +186,8 @@ void Search::update_quiet_histories(const Board &board,
         HISTORY_MAX);
     gravity(pawnHistory_[phIdx][bestPt][to_sq(bestMove)], scaledBonus, HISTORY_MAX);
 
-    // Compute base for weighted conthist update
+    // "bestBase" normalization for continuation history updates. Without this the
+    // conthist entries for a consistently-good move would grow unboundedly over time.
     int bestMainHist
         = (history_[us][from_sq(bestMove)][to_sq(bestMove)]
                    [threat_index(from_sq(bestMove), to_sq(bestMove), threats)]
@@ -216,6 +218,7 @@ void Search::update_quiet_histories(const Board &board,
         (*ch4)[bestPt][to_sq(bestMove)]
             += (scaledBonus / 4) - bestBase * std::abs(scaledBonus / 4) / HISTORY_MAX;
 
+    // Penalize every quiet that was tried before the cutoff move.
     for (int i = 0; i < triedCount; ++i)
     {
         if (tried[i] == bestMove)
@@ -255,7 +258,7 @@ void Search::update_quiet_histories(const Board &board,
 }
 
 void Search::update_capture_histories(const Board & /*board*/,
-    // Simpler than quiet update: only captureHistory table, no continuation component.
+    // Simpler than quiet update: only captureHistory_, no continuation component.
     Color      us,
     Move       bestMove,
     PieceType  bestPt,
@@ -290,8 +293,6 @@ void Search::update_capture_histories(const Board & /*board*/,
 // ---------------------------------------------------------------------------
 bool Search::opponent_has_winning_capture(const Board &board) const
 {
-    // Check if any opponent piece can capture one of our pieces with SEE >= 0.
-    // Used for pruning heuristics that depend on tactical safety.
     Color    them = ~board.side_to_move();
     Bitboard occ  = board.pieces();
     for (PieceType pt = PAWN; pt <= QUEEN; ++pt)
@@ -337,6 +338,7 @@ bool Search::opponent_has_winning_capture(const Board &board) const
 
 bool Search::is_shuffling(Move m, int ply) const
 {
+    // Detect A->B->A->B repetition: from_sq(m) == to_sq(m-2) and to_sq(m) == from_sq(m-2).
     if (ply < 4)
         return false;
     const SearchStack *cur = ss(ply);
@@ -356,15 +358,13 @@ bool Search::is_shuffling(Move m, int ply) const
 // ---------------------------------------------------------------------------
 int Search::adjusted_eval(const Board &board, int ply)
 {
-    // Apply correction history to NNUE eval, then scale toward draw by 50-move rule.
-    // Clamped to avoid mate score overlap.
     int   raw = NNUE::evaluate(accStack_, board, board.side_to_move());
     Color us  = board.side_to_move();
 
+    // Sum corrections from all tables, then divide by CORR_SCALE.
     int corr = 0;
     corr += corrMain_[us][(board.non_pawn_key(WHITE) ^ board.non_pawn_key(BLACK) * 2) % CORR_SIZE];
     corr += corrPawn_[us][board.pawn_key() % PAWN_CORR_SIZE];
-
     corr += corrNonPawnWhite_[us][board.non_pawn_key(WHITE) % NONPAWN_CORR_SIZE];
     corr += corrNonPawnBlack_[us][board.non_pawn_key(BLACK) % NONPAWN_CORR_SIZE];
 
@@ -380,6 +380,7 @@ int Search::adjusted_eval(const Board &board, int ply)
     int adjusted = raw + corr / CORR_SCALE;
     adjusted     = std::clamp(adjusted, -SCORE_MATE_IN_MAX_PLY + 1, SCORE_MATE_IN_MAX_PLY - 1);
 
+    // Scale toward draw as 50-move counter climbs — avoid playing for wins we can't prove.
     int rule50 = board.rule50_count();
     if (rule50 >= FIFTY_SCALE_NUM)
         return 0;
@@ -393,8 +394,8 @@ void Search::update_correction(const Board &board,
     int                                     depth,
     bool                                    bestIsCap)
 {
-    //  Update all correction tables with (searchScore - staticEval) * depth / 8.
-    //  Skipped on tactical cutoffs or mate scores.
+    // Skip on tactical cutoffs or when either score is a mate — corrections are
+    // only meaningful for positional eval errors, not forced mate lines.
     if (bestIsCap || depth < 2 || staticEval == SCORE_NONE)
         return;
     if (is_mate_score(searchScore) || is_mate_score(staticEval))
@@ -406,7 +407,6 @@ void Search::update_correction(const Board &board,
 
     upd(corrMain_[us][(board.non_pawn_key(WHITE) ^ board.non_pawn_key(BLACK) * 2) % CORR_SIZE]);
     upd(corrPawn_[us][board.pawn_key() % PAWN_CORR_SIZE]);
-
     upd(corrNonPawnWhite_[us][board.non_pawn_key(WHITE) % NONPAWN_CORR_SIZE]);
     upd(corrNonPawnBlack_[us][board.non_pawn_key(BLACK) % NONPAWN_CORR_SIZE]);
 
@@ -451,6 +451,10 @@ void Search::print_info([[maybe_unused]] const Board &board,
 // ---------------------------------------------------------------------------
 // Quiescence search
 // ---------------------------------------------------------------------------
+// Called at depth 0 to resolve tactical noise before returning a score.
+// Searches captures (and checks) until the position is "quiet", preventing
+// the horizon effect where a hanging piece is invisible just past search depth.
+// stand-pat serves as a lower bound — if we're already above beta, return early.
 int Search::quiescence(Board &board, int alpha, int beta, int ply)
 {
     ++info_.nodes;
@@ -469,7 +473,7 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
         }
     }
 
-    if ((stopped.load(std::memory_order_relaxed) || tm_->time_up(info_.nodes)))
+    if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
         return 0;
     if (ply >= MAX_PLY - 1)
         return adjusted_eval(board, ply);
@@ -478,7 +482,6 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
     if (board.is_draw(ply))
         return draw_score();
 
-    // TT probe in q-search: accept exact scores and cutoffs, but depth is always 0 or negative.
     auto     probeResult = tt.probe(board.key());
     bool     ttHit       = std::get<0>(probeResult);
     TTData   ttData      = std::get<1>(probeResult);
@@ -496,6 +499,7 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
         if (is_valid_tt_move(board, rawTT))
             ttMove = rawTT;
 
+        // QS TT cutoffs: only trust TT entries stored at depth >= 0.
         if (ttData.depth >= 0)
         {
             if (ttFlag == TT_EXACT)
@@ -515,20 +519,21 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
     {
         if (standPat >= beta)
         {
+            // Soften the cutoff slightly to avoid sharp eval discontinuities at the horizon.
             if (!is_mate_score(standPat) && !is_mate_score(beta))
                 return ilerp(standPat, beta, QS_CUTOFF_LERP);
             return standPat;
         }
         if (standPat > alpha)
             alpha = standPat;
+        // Delta pruning: even the best possible capture can't close the gap — bail.
         if (standPat + DELTA_MARGIN + PIECE_VALUE[QUEEN] <= alpha)
             return standPat;
     }
 
-    // Use a separate buffer from negamax to avoid aliasing (q-search can be called recursively).
     ss(ply)->staticEval = inCheck ? SCORE_NONE : standPat;
 
-    // Use a local buffer — never alias with negamax buffers
+    // Dedicated buffer — never alias with negamax move buffers.
     MoveBuffer qsBuf;
     MovePicker mp(board, ttMove, standPat - alpha - DELTA_MARGIN, true, captureHistory_, qsBuf);
 
@@ -546,6 +551,8 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
 
         if (isQuiet && !givesCheck)
             continue;
+        // Allow checking moves with lightweight pieces — heavy pieces checking are
+        // usually not urgent enough to be worth searching in q-search.
         if (isQuiet && givesCheck)
         {
             PieceType movedPt = piece_type(board.piece_on(from_sq(m)));
@@ -555,8 +562,7 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
 
         if (!inCheck && !givesCheck && isCapture && !isPromo)
         {
-            // Delta pruning: if capturing this piece + margin still below alpha, skip.
-            // Only applies when not in check and capture doesn't give check.
+            // Delta pruning: if capturing this piece + margin still won't reach alpha, skip.
             PieceType captPt = piece_type(board.piece_on(to_sq(m)));
             int       futVal = standPat + PIECE_VALUE[captPt] + 200;
             if (futVal <= alpha)
@@ -569,9 +575,7 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
         if (!board.is_legal(m))
             continue;
         if (stateSP_ >= 32767)
-        {
             continue;
-        }
 
         const Piece qs_moved = board.piece_on(from_sq(m));
         const Piece qs_captured
@@ -587,7 +591,7 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
         accStack_.pop();
         --stateSP_;
 
-        if ((stopped.load(std::memory_order_relaxed) || tm_->time_up(info_.nodes)))
+        if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
             return 0;
 
         if (score > bestScore)
@@ -603,10 +607,11 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
     if (inCheck && moveCount == 0)
         return -SCORE_MATE + ply;
 
+    // Soften fail-high return — same reason as stand-pat cutoff above.
     if (bestScore >= beta && !is_mate_score(bestScore) && !is_mate_score(beta))
         bestScore = ilerp(bestScore, beta, QS_FAILHIGH_LERP);
 
-    if (moveCount > 0 && !(stopped.load(std::memory_order_relaxed) || tm_->time_up(info_.nodes))
+    if (moveCount > 0 && !(is_stopped() || (tm_ && tm_->time_up(info_.nodes)))
         && std::abs(bestScore) < SCORE_INFINITE)
     {
         TTFlag flag = (bestScore >= beta) ? TT_LOWER : TT_UPPER;
@@ -627,8 +632,15 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
 }
 
 // ---------------------------------------------------------------------------
-// Negamax
+// Negamax alpha-beta
 // ---------------------------------------------------------------------------
+// Standard negamax with the following layers, in order:
+//   1. TT probe + cutoffs
+//   2. Static eval + correction history
+//   3. Non-PV pruning: razoring, RFP, NMP, ProbCut
+//   4. IIR
+//   5. Move loop with futility, LMP, SEE, singular extension, LMR
+//   6. History updates on cutoff, correction update, TT store
 int Search::negamax(Board &board,
     int                    depth,
     int                    alpha,
@@ -657,9 +669,8 @@ int Search::negamax(Board &board,
         }
     }
 
-    if ((stopped.load(std::memory_order_relaxed) || tm_->time_up(info_.nodes)))
+    if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
         return 0;
-    // Maximum ply reached — return static eval to avoid stack overflow.
     if (ply >= MAX_PLY - 1)
         return adjusted_eval(board, ply);
 
@@ -669,7 +680,7 @@ int Search::negamax(Board &board,
     if (!rootNode && board.is_draw(ply))
         return draw_score();
 
-    // Mate distance pruning
+    // Mate distance pruning: no point searching deeper than an already-proven mate.
     if (!rootNode)
     {
         alpha = std::max(alpha, -SCORE_MATE + ply);
@@ -697,7 +708,8 @@ int Search::negamax(Board &board,
     const int priorReduction = (ply > 0) ? ss(ply - 1)->reduction : 0;
     cur->reduction           = 0;
 
-    // Compute opponent threat map
+    // Build opponent threat map — squares attacked by any opponent piece.
+    // Used for threat-aware history indexing throughout this node.
     {
         Color    opp = ~board.side_to_move();
         Bitboard occ = board.pieces();
@@ -743,14 +755,14 @@ int Search::negamax(Board &board,
         if (is_valid_tt_move(board, rawTT))
             ttMove = rawTT;
 
-        // TT cutoff
         if (!pvNode && ttDepth >= depth)
         {
             if (ttFlag == TT_EXACT)
                 return ttScore;
             if (ttFlag == TT_LOWER && ttScore >= beta)
             {
-                // Reward quiet TT cut move
+                // TT cut on a quiet move — give it a small history bonus so it gets
+                // ordered first next time we see this position.
                 if (ttMove != MOVE_NONE && !board.is_capture_or_promotion(ttMove))
                 {
                     int bonus = std::min(STAT_BONUS_MULT * depth + STAT_BONUS_BASE, STAT_BONUS_MAX);
@@ -780,6 +792,7 @@ int Search::negamax(Board &board,
             }
             if (ttFlag == TT_UPPER && ttScore <= alpha)
             {
+                // Fail low on a quiet TT move — penalize it so it orders lower next time.
                 if (ttMove != MOVE_NONE && !board.is_capture_or_promotion(ttMove))
                 {
                     int malus = std::min(STAT_MALUS_MULT * depth + STAT_MALUS_BASE, STAT_MALUS_MAX);
@@ -798,6 +811,10 @@ int Search::negamax(Board &board,
                     gravity(pawnHistory_[phIdx][ttPt][to_sq(ttMove)], -malus / 2, HISTORY_MAX);
                     if ((cur - 1)->contHistEntry)
                         gravity((*(cur - 1)->contHistEntry)[ttPt][to_sq(ttMove)],
+                            -malus,
+                            HISTORY_MAX);
+                    if ((cur - 2)->contHistEntry)
+                        gravity((*(cur - 2)->contHistEntry)[ttPt][to_sq(ttMove)],
                             -malus,
                             HISTORY_MAX);
                 }
@@ -819,6 +836,7 @@ int Search::negamax(Board &board,
         staticEval      = adjusted_eval(board, ply);
         cur->complexity = std::abs(staticEval - rawEval);
 
+        // Pre-populate TT with just the eval so future searches can skip calling NNUE.
         if (!ttHit && excludedMove == MOVE_NONE && depth >= 4)
             ttWriter.save(board.key(),
                 0,
@@ -830,6 +848,7 @@ int Search::negamax(Board &board,
                 false,
                 tt.generation());
 
+        // Clamp static eval toward the TT score if TT provides a tighter bound.
         if (ttHit && ttFlag != TT_NONE)
         {
             if (ttFlag == TT_LOWER && ttScore > staticEval)
@@ -841,12 +860,11 @@ int Search::negamax(Board &board,
         cur->staticEval = staticEval;
         cur->rawEval    = rawEval;
 
-        // Eval history update
+        // Eval history: if our static eval jumped since our last move, the opponent's
+        // quiet move in between was bad for them — retroactively penalize it.
         if (ply >= 1 && (cur - 1)->move != MOVE_NONE && !(cur - 1)->playedCap
             && (cur - 1)->staticEval != SCORE_NONE)
         {
-            // If our eval improved, opponent's last quiet move was bad for them.
-            // delta = how much we improved; apply as malus to their move.
             int   delta   = staticEval - (cur - 1)->staticEval;
             int   ehBonus = std::clamp(delta / 2, -512, 512);
             Color them    = ~board.side_to_move();
@@ -872,6 +890,9 @@ int Search::negamax(Board &board,
     }
 
     // ── Improving / opponentWorsening ─────────────────────────────────────────
+    // improving: our eval is trending up compared to 2 or 4 plies ago.
+    // Tightens pruning margins when true — the position is getting better on its own.
+    // opponentWorsening: sum of both sides' evals is positive — opponent is in trouble.
     bool improving = false, opponentWorsening = false;
     if (!inCheck)
     {
@@ -882,14 +903,14 @@ int Search::negamax(Board &board,
 
         if (ply >= 1 && (cur - 1)->staticEval != SCORE_NONE)
             opponentWorsening = staticEval + (cur - 1)->staticEval > 1;
-        // improving if static eval already beats beta
         improving |= staticEval >= beta;
     }
 
     // ── Hindsight depth adjustment ────────────────────────────────────────────
-    // Adjust depth based on previous reduction and eval trends.
-    // Extend if prior reduction was large and opponent didn't worsen.
-    // Reduce if both sides' evals are high (tactical, less pruning needed).
+    // If the parent reduced this node heavily but opponent didn't worsen,
+    // the reduction was probably too aggressive — give back a ply.
+    // If both sides have high evals, the position is tactical — reduce slightly
+    // so we spend less time on this likely-to-be-cut node.
     if (!inCheck && excludedMove == MOVE_NONE)
     {
         if (priorReduction >= 3 * LMR_FRAC && !opponentWorsening)
@@ -904,7 +925,8 @@ int Search::negamax(Board &board,
     {
         int prevHistScore = (ply >= 1) ? (cur - 1)->histScore : 0;
 
-        // Razoring
+        // Razoring: at very low depths, if eval + a generous margin is still below alpha,
+        // do a QS check to confirm before giving up.
         if (depth <= 3 && staticEval + 350 * depth < alpha)
         {
             int q = quiescence(board, alpha, alpha + 1, ply + 1);
@@ -912,7 +934,8 @@ int Search::negamax(Board &board,
                 return q;
         }
 
-        // Reverse futility pruning
+        // Reverse futility pruning: static eval is so far above beta that we're
+        // almost certainly going to beat it — skip the search.
         if (depth < RFP_MAX_DEPTH && !is_mate_score(staticEval))
         {
             int margin = RFP_MARGIN_MULT * depth - (improving ? 80 : 0)
@@ -921,7 +944,10 @@ int Search::negamax(Board &board,
                 return ilerp(staticEval, beta, 0.333);
         }
 
-        // Null move pruning
+        // Null move pruning: pass the turn to the opponent.
+        // If they STILL can't beat beta, our position is overwhelming.
+        // Guards: requires major/minor pieces (avoid zugzwang), depth >= 3,
+        //         and eval well above beta.
         if (!pvNode && depth >= 3 && staticEval >= beta
             && staticEval >= beta + NMP_BETA_BASE - NMP_BETA_MULT * depth
             && (cur - 1)->move != MOVE_NONE && ply >= nmpMinPly_
@@ -930,8 +956,6 @@ int Search::negamax(Board &board,
                 | board.pieces(ROOK, board.side_to_move())
                 | board.pieces(QUEEN, board.side_to_move())))
         {
-            // Pass the turn to opponent. If they still can't get below beta, we're too good.
-            // Verification search at reduced depth avoids zugzwang false positives.
             int R
                 = std::min(NMP_BASE_R + depth / 3 + std::min(2, (staticEval - beta) / NMP_EVAL_DIV),
                     depth);
@@ -944,14 +968,14 @@ int Search::negamax(Board &board,
             if (stateSP_ < 32760)
             {
                 board.make_null_move(statePool_[stateSP_++]);
-                accStack_.push();  // null move — no piece changes
+                accStack_.push();  // null move — accumulator doesn't change
                 int nullScore
                     = -negamax(board, depth - 1 - R, -beta, -beta + 1, ply + 1, false, !cutNode);
                 board.unmake_null_move();
                 accStack_.pop();
                 --stateSP_;
 
-                if ((stopped.load(std::memory_order_relaxed) || tm_->time_up(info_.nodes)))
+                if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
                     return 0;
 
                 if (nullScore >= beta)
@@ -959,6 +983,8 @@ int Search::negamax(Board &board,
                     if (nullScore >= SCORE_MATE_IN_MAX_PLY)
                         nullScore = beta;
 
+                    // Verification search at high depths: do a real search at reduced depth
+                    // to confirm we're not in a zugzwang position.
                     if (depth >= NMP_VERIF_DEPTH && nmpMinPly_ == 0)
                     {
                         nmpMinPly_ = ply + 3 * (depth - R) / 4;
@@ -978,13 +1004,14 @@ int Search::negamax(Board &board,
     }
 
     // ── ProbCut ───────────────────────────────────────────────────────────────
+    // If a shallow capture search already beats a high beta threshold, there's
+    // very likely a refutation — return early without searching all moves.
     if (!pvNode && !inCheck && excludedMove == MOVE_NONE && depth >= PROBCUT_DEPTH
         && std::abs(beta) < SCORE_MATE_IN_MAX_PLY)
     {
         int pcBeta  = beta + PROBCUT_MARGIN - 63 * improving;
         int pcCount = 0;
 
-        // Dedicated buffer — never touches the main move loop buffer
         MoveBuffer pcBuf;
         MovePicker pcMp(board, ttMove, pcBeta - staticEval, true, captureHistory_, pcBuf);
 
@@ -1010,12 +1037,12 @@ int Search::negamax(Board &board,
             int pcScore = -quiescence(board, -pcBeta, -pcBeta + 1, ply + 1);
             if (pcScore >= pcBeta && depth >= 4)
                 pcScore
-                    = -negamax(board, depth - 4, -pcBeta, -pcBeta + 1, ply + 1, false, !cutNode);
+                    = -negamax(board, depth - 3, -pcBeta, -pcBeta + 1, ply + 1, false, !cutNode);
             board.unmake_move(m);
             accStack_.pop();
             --stateSP_;
 
-            if ((stopped.load(std::memory_order_relaxed) || tm_->time_up(info_.nodes)))
+            if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
                 return 0;
 
             if (pcScore >= pcBeta)
@@ -1035,11 +1062,12 @@ int Search::negamax(Board &board,
     }
 
     // ── IIR ───────────────────────────────────────────────────────────────────
+    // No TT move at sufficient depth = we're searching blind — reduce by 1.
     if (depth >= IIR_MIN_DEPTH && ttMove == MOVE_NONE && excludedMove == MOVE_NONE && !inCheck)
         --depth;
 
-    // Small probcut — if TT says this node is likely to fail high by a large
-    // margin, return early without searching moves
+    // Small probcut: TT tells us this node already failed high by a huge margin
+    // on a previous search — trust it and return early.
     if (!pvNode && excludedMove == MOVE_NONE && ttFlag == TT_LOWER && ttDepth >= depth - 4
         && ttScore >= beta + 416 && !is_mate_score(beta) && !is_mate_score(ttScore))
         return beta + 416;
@@ -1056,7 +1084,6 @@ int Search::negamax(Board &board,
     ContinuationHistory *ch3 = (cur - 3)->contHistEntry;
     ContinuationHistory *ch4 = (cur - 4)->contHistEntry;
 
-    // Each ply gets its own dedicated buffer slot
     MovePicker mp(board,
         ttMove,
         ply,
@@ -1122,13 +1149,15 @@ int Search::negamax(Board &board,
         ++moveCount;
         cur->seenMoves = moveCount;
 
-        // ── Pruning ──────────────────────────────────────────────────────────
+        // ── Per-move pruning ─────────────────────────────────────────────────
         if (!rootNode && bestScore > -SCORE_MATE_IN_MAX_PLY)
         {
+            // LMR'd depth — used to scale futility and LMP thresholds.
             int lmrD = std::max(0,
                 depth - 1
                     - LMRTable[isQuiet ? 1 : 0][std::min(63, depth)][std::min(63, moveCount)]);
 
+            // LMP: after enough quiets at low depth, the rest are almost certainly junk.
             if (isQuiet && depth <= LMP_MAX_DEPTH && moveCount > 1)
             {
                 int lmpThresh = (LMP_BASE + depth * depth) / (improving ? 1 : 2);
@@ -1139,6 +1168,7 @@ int Search::negamax(Board &board,
                 }
             }
 
+            // Futility pruning: static eval + margin still below alpha — skip this quiet.
             if (isQuiet && !inCheck && staticEval != SCORE_NONE && lmrD < FUTILITY_MAX_D
                 && moveCount > 1)
             {
@@ -1150,7 +1180,7 @@ int Search::negamax(Board &board,
                 }
             }
 
-            // Capture futility - prune bad captures
+            // Capture futility: even winning the piece wouldn't reach alpha — skip.
             if (isCapture && !inCheck && !isPromo && !board.gives_check(m) && moveCount > 1)
             {
                 int captValue = PIECE_VALUE[captPt];
@@ -1159,6 +1189,7 @@ int Search::negamax(Board &board,
                     continue;
             }
 
+            // SEE pruning: skip moves that lose too much material.
             if (moveCount > 1 && depth <= 10)
             {
                 int seeThresh
@@ -1169,18 +1200,20 @@ int Search::negamax(Board &board,
         }
 
         // ── Singular extension ────────────────────────────────────────────────
+        // If the TT move is significantly better than all alternatives (confirmed by
+        // a reduced search with a lowered beta), extend it by 1 extra ply.
         int ext = 0;
         if (!rootNode && m == ttMove && excludedMove == MOVE_NONE && depth >= SE_DEPTH
             && ttDepth >= depth - 3 && ttFlag == TT_LOWER
             && std::abs(ttScore) < SCORE_MATE_IN_MAX_PLY && !is_shuffling(m, ply))
         {
             int singBeta = ttScore - (53 + 75 * (ttPV && !pvNode)) * depth / 60;
-            // Use ply+1 so the recursive call gets its own moveBuf slot
             int singScore
                 = negamax(board, depth / 2, singBeta - 1, singBeta, ply + 1, false, cutNode, m);
 
             if (singScore < singBeta)
             {
+                // The TT move is clearly best — extend. Go double/triple if the margin is huge.
                 bool doDouble         = !pvNode && singScore < singBeta - SE_DOUBLE_MARGIN
                                         && (cur - 1)->doubleExtensions < 3;
                 bool doTriple         = !pvNode && singScore < singBeta - SE_TRIPLE_MARGIN
@@ -1192,6 +1225,8 @@ int Search::negamax(Board &board,
             }
             else if (singScore >= beta)
             {
+                // Multi-cut: if even the excluded search beats beta, the position is too good —
+                // try a slightly shallower search to confirm, then return.
                 int mcDepth = std::max(depth - 4, depth / 2);
                 int mcScore = negamax(board, mcDepth, beta - 1, beta, ply, false, cutNode);
                 if (mcScore >= beta)
@@ -1199,6 +1234,8 @@ int Search::negamax(Board &board,
             }
             else if (singBeta >= beta)
             {
+                // singBeta >= beta means our reduced window already implies a fail high —
+                // store a lower bound and return without searching further.
                 int mcScore = std::min(singBeta, SCORE_MATE_IN_MAX_PLY - 1);
                 ttWriter.save(board.key(),
                     score_to_tt(mcScore, ply),
@@ -1213,34 +1250,28 @@ int Search::negamax(Board &board,
             }
             else if (ttScore >= beta)
             {
-                ext = -1;
+                ext = -1;  // TT score already above beta but not overwhelmingly — reduce
             }
             else if (cutNode)
             {
-                ext = -3;
+                ext = -3;  // cut node with no singularity — aggressively reduce
             }
         }
 
         if (inCheck)
-            ext = std::max(ext, 1);
+            ext = std::max(ext, 1);  // always extend when in check
 
         if (!board.is_legal(m))
-        {
             continue;
-        }
         if (stateSP_ >= 32767)
-        {
             continue;
-        }
 
-        // Save info needed for incremental NNUE update BEFORE make_move
+        // Save piece info BEFORE make_move (board state changes after).
         const Piece moved_piece = board.piece_on(from_sq(m));
         const Piece captured_piece
             = is_en_passant(m) ? makePiece(~us, PAWN) : board.piece_on(to_sq(m));
 
         board.make_move(m, statePool_[stateSP_++]);
-
-        // Incremental accumulator update
         NNUE::push_move(accStack_, board, m, us, moved_piece, captured_piece);
 
         const bool givesCheck = board.in_check();
@@ -1255,6 +1286,8 @@ int Search::negamax(Board &board,
         int score    = 0;
 
         // ── LMR ──────────────────────────────────────────────────────────────
+        // Reduce later moves — they're less likely to be good.
+        // Apply adjustments based on node type, improving flag, history, etc.
         bool fullSearch = true;
         if (moveCount > 1 + rootNode && newDepth >= 2 && !inCheck)
         {
@@ -1262,33 +1295,35 @@ int Search::negamax(Board &board,
                          * LMR_FRAC;
 
             if (cutNode)
-                R_frac += 2 * LMR_FRAC;
+                R_frac += 2 * LMR_FRAC;  // cut nodes are likely to fail high — reduce more
             else if (!pvNode)
-                R_frac += LMR_FRAC;
+                R_frac += LMR_FRAC;  // non-PV nodes less critical
             if (!improving)
-                R_frac += LMR_FRAC;
+                R_frac += LMR_FRAC;  // eval trending down — be more aggressive
             if (givesCheck)
-                R_frac -= LMR_FRAC;
+                R_frac -= LMR_FRAC;  // checks need full attention
             if (ttPV)
-                R_frac -= 2 * LMR_FRAC;
+                R_frac -= 2 * LMR_FRAC;  // was on PV in a prior search — trust it more
             if (m == killers_[ply][0] || m == killers_[ply][1])
-                R_frac -= 2 * LMR_FRAC;
+                R_frac -= 2 * LMR_FRAC;  // killer moves are historically good at this ply
             if (m == counter)
-                R_frac -= LMR_FRAC;
+                R_frac -= LMR_FRAC;  // counter move — refuted opponent's last move before
             if (cur->complexity > 50)
-                R_frac -= LMR_FRAC;
+                R_frac -= LMR_FRAC;  // high complexity = correction is doing a lot, be careful
 
+            // History adjusts reduction: good history = less reduction, bad = more.
             if (isQuiet)
                 R_frac -= histScore * LMR_FRAC / LMR_HIST_QUIET_DIV;
             else
                 R_frac -= histScore * LMR_FRAC / LMR_HIST_NOISY_DIV;
-            // Reduce more for very bad history
             if (isQuiet && histScore < -8192)
-                R_frac += LMR_FRAC;
+                R_frac += LMR_FRAC;  // deeply negative history — reduce even more
 
+            // Each alpha raise tightens the window, making further reductions riskier.
             if (alphaRaises > 0)
-                R_frac += alphaRaises * LMR_FRAC / 2;
+                R_frac += std::min(alphaRaises, 2) * LMR_FRAC / 2;
 
+            // If children cut off quickly, this subtree is noisy — reduce siblings more.
             int nextCutoffs = (ply + 1 < MAX_PLY) ? ss(ply + 1)->cutoffCnt : 0;
             if (nextCutoffs > 2)
                 R_frac += 2 * LMR_FRAC;
@@ -1301,6 +1336,7 @@ int Search::negamax(Board &board,
 
             if (score > alpha && R > 0)
             {
+                // Reduced search beat alpha — decide if re-search should go deeper or shallower.
                 bool deeper    = score > bestScore + ZWS_DEEPER_MARGIN + 2 * newDepth;
                 bool shallower = score < bestScore + ZWS_SHALLOWER_MARGIN;
                 newDepth       = std::min(newDepth + deeper - shallower, MAX_PLY - ply - 1);
@@ -1316,6 +1352,7 @@ int Search::negamax(Board &board,
         {
             if (pvNode && moveCount == 1)
             {
+                // First move at a PV node — full-window search, track nodes for time scaling.
                 uint64_t nodesBefore = info_.nodes;
                 score = -negamax(board, newDepth, -beta, -alpha, ply + 1, true, false);
                 if (rootNode)
@@ -1323,11 +1360,10 @@ int Search::negamax(Board &board,
             }
             else
             {
+                // ZWS first, then re-search with full window if it raises alpha in a PV node.
                 score = -negamax(board, newDepth, -alpha - 1, -alpha, ply + 1, false, !cutNode);
                 if (pvNode && score > alpha && score < beta)
-                {
                     score = -negamax(board, newDepth, -beta, -alpha, ply + 1, true, false);
-                }
             }
         }
 
@@ -1335,7 +1371,7 @@ int Search::negamax(Board &board,
         --stateSP_;
         accStack_.pop();
 
-        if ((stopped.load(std::memory_order_relaxed) || tm_->time_up(info_.nodes)))
+        if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
             return 0;
 
         if (score > bestScore)
@@ -1358,12 +1394,16 @@ int Search::negamax(Board &board,
             }
             if (!isCapture)
                 update_counter(us, prevMove, m);
-            if (depth >= ALPHA_RAISE_DEPTH_MIN && depth <= ALPHA_RAISE_DEPTH_MAX
+            // Slightly reduce depth after an alpha raise — we now have a tighter bound,
+            // so earlier moves at this depth are less likely to matter.
+            if (alphaRaises == 1 && depth >= ALPHA_RAISE_DEPTH_MIN && depth <= ALPHA_RAISE_DEPTH_MAX
                 && !is_mate_score(beta) && !is_mate_score(alpha))
                 --depth;
         }
+
         if (alpha >= beta)
         {
+            // Beta cutoff — update histories for the move that caused it.
             int histDepth = depth + (staticEval != SCORE_NONE && staticEval <= origAlpha ? 1 : 0)
                             + (bestScore > beta + 209 ? 1 : 0);
 
@@ -1380,8 +1420,8 @@ int Search::negamax(Board &board,
                     quietCount,
                     cur->threats,
                     improving);
-                // All tried captures also failed — penalise them
-                // MOVE_NONE as bestMove means only the malus loop runs
+                // Tried captures also failed — penalise them.
+                // Passing MOVE_NONE as bestMove means only the malus loop runs.
                 if (capsCount > 0)
                     update_capture_histories(board,
                         us,
@@ -1416,7 +1456,7 @@ int Search::negamax(Board &board,
         }
     }
 
-    // ── Terminal ──────────────────────────────────────────────────────────────
+    // ── Terminal node ─────────────────────────────────────────────────────────
     if (moveCount == 0)
     {
         if (excludedMove != MOVE_NONE)
@@ -1424,7 +1464,8 @@ int Search::negamax(Board &board,
         return inCheck ? -SCORE_MATE + ply : draw_score();
     }
 
-    // Reward the previous move when we fail low
+    // Fail low: no move raised alpha. Reward the opponent's previous quiet move —
+    // it was so strong we couldn't find anything better against it.
     if (bestMove == MOVE_NONE && ply >= 1 && (cur - 1)->move != MOVE_NONE && !(cur - 1)->playedCap)
     {
         Move  prev  = (cur - 1)->move;
@@ -1438,36 +1479,31 @@ int Search::negamax(Board &board,
         gravity(pawnHistory_[phIdx][(cur - 1)->movedPt][to_sq(prev)], bonus / 2, HISTORY_MAX);
     }
 
-    // ttPv propagation — if we fail low, inherit parent's ttPv flag
-    // This helps move ordering on re-searches by remembering PV history
-    // Propagate PV flag to help move ordering on re-searches.
+    // Propagate PV flag upward on fail-low — helps move ordering on future re-searches.
     if (bestScore <= origAlpha)
         cur->ttPv = cur->ttPv || (ply > 0 && ss(ply - 1)->ttPv);
 
     // Correction history update
     bool bestIsCap = (bestMove != MOVE_NONE) && board.is_capture(bestMove);
     if (excludedMove == MOVE_NONE && staticEval != SCORE_NONE
-        && !(stopped.load(std::memory_order_relaxed) || tm_->time_up(info_.nodes)))
+        && !(is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
         update_correction(board, ply, cur->staticEval, bestScore, depth, bestIsCap);
 
-    // TT store
-    // Store search result in TT. isPV flag helps distinguish PV nodes for IIR/LMR.
-    if (!(stopped.load(std::memory_order_relaxed) || tm_->time_up(info_.nodes))
-        && excludedMove == MOVE_NONE && std::abs(bestScore) < SCORE_INFINITE)
+    // TT store — flag depends on whether we raised alpha or got cut.
+    if (!(is_stopped() || (tm_ && tm_->time_up(info_.nodes))) && excludedMove == MOVE_NONE
+        && std::abs(bestScore) < SCORE_INFINITE)
     {
         TTFlag flag;
         if (bestScore >= beta)
-            flag = TT_LOWER;  // Beta cutoff — score is a lower bound.
+            flag = TT_LOWER;  // beta cutoff — score is a lower bound
         else if (bestScore > origAlpha)
-            flag = TT_EXACT;  // Alpha raised — exact score within window.
+            flag = TT_EXACT;  // alpha raised — exact score within window
         else
-            flag = TT_UPPER;  // Fail low — score is an upper bound.
-
-        int storeScore = bestScore;
+            flag = TT_UPPER;  // fail low — score is an upper bound
 
         int storeEval = (rawEval != SCORE_NONE && std::abs(rawEval) < SCORE_INFINITE) ? rawEval : 0;
         ttWriter.save(board.key(),
-            score_to_tt(storeScore, ply),
+            score_to_tt(bestScore, ply),
             depth,
             flag,
             bestMove,
@@ -1487,11 +1523,16 @@ Move Search::best_move(Board &board, TimeManager &tm)
 {
     tm_      = &tm;
     stateSP_ = 0;
+    // Only the main thread bumps the TT generation counter.
+    // Helpers share the same TT and must NOT call new_search().
     if (!isSilent)
         tt.new_search();
     info_.reset();
-    // Light reset — preserve history tables across moves within a game.
-    // Full clear_tables() is only called between games (via ucinewgame).
+    completedDepth_ = 0;
+    lastBestMove_   = MOVE_NONE;
+
+    // Light reset between moves — preserves history tables since they're valuable
+    // across the whole game. Full clear_tables() is only for ucinewgame.
     for (auto &pv : pvTable_)
         pv.length = 0;
     for (auto &s : stack_)
@@ -1508,9 +1549,18 @@ Move Search::best_move(Board &board, TimeManager &tm)
     int    prevScore = 0;
     PvList savedPV { };
 
-    for (int depth = 1; depth <= limits.depth; ++depth)
+    // Lazy SMP depth perturbation: helper threads start at slightly different depths
+    // to explore different parts of the tree and avoid duplicating the main thread's work.
+    // Odd-indexed helpers also skip even depths, creating further divergence.
+    const int startDepth = (threadIdx_ == 0)       ? 1
+                           : (threadIdx_ % 2 == 1) ? 1 + (threadIdx_ % 4)
+                                                   : 2 + (threadIdx_ % 4);
+
+    for (int depth = startDepth; depth <= limits.depth; ++depth)
     {
-        if (!isSilent && !limits.infinite && tm_->soft_limit_reached() && depth > 1)
+        // Only the main thread drives time-based early exit.
+        // Helpers keep going deeper — best_thread() picks the winner.
+        if (threadIdx_ == 0 && !limits.infinite && tm_->soft_limit_reached() && depth > 1)
             break;
 
         info_.selDepth = 0;
@@ -1524,7 +1574,8 @@ Move Search::best_move(Board &board, TimeManager &tm)
 
         if (depth >= 6 && !nearMate)
         {
-            // Aspiration window: start narrow, widen on fail-low/fail-high.
+            // Aspiration windows: start narrow, widen on fail-low/fail-high.
+            // Delta grows quadratically with score to handle sharp positions.
             int delta  = ASP_INIT_DELTA + bestScore * bestScore / 13000;
             int wAlpha = bestScore - delta;
             int wBeta  = bestScore + delta;
@@ -1533,24 +1584,26 @@ Move Search::best_move(Board &board, TimeManager &tm)
             {
                 score = negamax(board, depth, wAlpha, wBeta, 0, true, false);
 
-                if (score == 0
-                    && (stopped.load(std::memory_order_relaxed) || tm_->time_up(info_.nodes)))
+                if (score == 0 && (is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
                     break;
-                if (tm_->is_stopped())
+                if (is_stopped())
                     break;
 
                 if (score <= wAlpha)
                 {
+                    // Fail low — widen downward. Pull beta toward the middle to tighten
+                    // the upper bound and reduce wasted work on the fail-high side.
                     wBeta  = (wAlpha + wBeta) / 2;
                     wAlpha = std::max(wAlpha - delta, -SCORE_INFINITE);
                     delta += delta / 2;
                 }
                 else if (score >= wBeta)
-                //  Fail high: score above window — widen upward and save best move.
                 {
+                    // Fail high — widen upward. Save best move since this iteration
+                    // found something better even if we haven't fully confirmed it.
                     wBeta = std::min(wBeta + delta, SCORE_INFINITE);
                     delta += delta / 2;
-                    if (info_.bestMove != MOVE_NONE)
+                    if (info_.bestMove != MOVE_NONE && board.is_legal(info_.bestMove))
                         bestMove = info_.bestMove;
                     savedPV = pvTable_[0];
                 }
@@ -1563,7 +1616,6 @@ Move Search::best_move(Board &board, TimeManager &tm)
                 {
                     score = negamax(board, depth, -SCORE_INFINITE, SCORE_INFINITE, 0, true, false);
                     savedPV = pvTable_[0];
-
                     break;
                 }
             }
@@ -1574,36 +1626,41 @@ Move Search::best_move(Board &board, TimeManager &tm)
             savedPV = pvTable_[0];
         }
 
-        if ((stopped.load(std::memory_order_relaxed) || tm_->time_up(info_.nodes)) && depth > 1)
+        if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))) && depth > 1)
             break;
-        if (tm_->is_stopped() && depth > 1)
+        if (is_stopped() && depth > 1)
             break;
 
         if (info_.bestMove != MOVE_NONE && board.is_legal(info_.bestMove))
         {
-            // Safety: never accept a move that immediately stalemates the opponent
+            // Safety: never accept a move that immediately stalemates the opponent.
+            // This can happen in zugzwang-like endings where the engine finds a "win"
+            // that accidentally lets the opponent claim a draw.
             {
                 StateInfo si;
                 board.make_move(info_.bestMove, si);
                 bool stalemates = !board.in_check() && generate_legal(board).empty();
                 board.unmake_move(info_.bestMove);
                 if (stalemates)
-                {
-                    // Reject this move — keep previous bestMove
                     continue;
-                }
             }
+
             bool     changed = (info_.bestMove != bestMove);
             int      delta   = (depth > 1) ? std::abs(score - prevScore) : 0;
             uint64_t totalNodes
                 = sharedNodes_ ? sharedNodes_->load(std::memory_order_relaxed) : info_.nodes;
-            tm_->update_scale(changed, delta, info_.bestMoveNodes, totalNodes, depth, score);
+            // update_scale() modifies time manager internal state — only the main thread
+            // owns time management, helpers must never call this.
+            if (threadIdx_ == 0)
+                tm_->update_scale(changed, delta, info_.bestMoveNodes, totalNodes, depth, score);
 
             bestMove        = info_.bestMove;
             prevScore       = bestScore;
             bestScore       = score;
             info_.lastScore = score;
         }
+
+        completedDepth_ = depth;
 
         if (pvTable_[0].length == 0 && savedPV.length > 0)
             pvTable_[0] = savedPV;
@@ -1613,15 +1670,14 @@ Move Search::best_move(Board &board, TimeManager &tm)
                 = sharedNodes_ ? sharedNodes_->load(std::memory_order_relaxed) : info_.nodes;
             print_info(board, depth, bestScore, tm_->elapsed_ms(), reportNodes);
         }
-        // Stop early for forced mates in 3 or fewer moves (avoids playing into stalemate
-        // at subsequent depths after a short mate has already been found)
+        // Short mate found — no point searching deeper into something already settled.
         if (is_mate_score(bestScore) && std::abs(bestScore) >= SCORE_MATE - 6)
             break;
-        if (!isSilent && !limits.infinite && tm_->soft_limit_reached())
+        if (threadIdx_ == 0 && !limits.infinite && tm_->soft_limit_reached())
             break;
     }
 
-    // Fallback
+    // Fallback: if we somehow ended up with no move, just pick the first legal one.
     if (bestMove == MOVE_NONE || !board.is_legal(bestMove))
     {
         MoveList moves = generate_legal(board);
@@ -1629,7 +1685,8 @@ Move Search::best_move(Board &board, TimeManager &tm)
             bestMove = *moves.begin();
     }
 
-    tm_ = nullptr;
+    lastBestMove_ = bestMove;
+    tm_           = nullptr;
     return bestMove;
 }
 
