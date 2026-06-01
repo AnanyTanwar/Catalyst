@@ -220,7 +220,8 @@ namespace Datagen {
             Board board;
             int   sp = 0;
 
-            tt.clear();
+            searcher_white->clear_tables();
+            searcher_black->clear_tables();
 
             if (!book.empty())
             {
@@ -266,7 +267,6 @@ namespace Datagen {
 
                 searcher_white->best_move(board, vtm);
                 const int vscore = searcher_white->last_score();
-                tt.clear();
 
                 if (std::abs(vscore) > cfg.verify_limit)
                     continue;
@@ -325,8 +325,10 @@ namespace Datagen {
                     break;
                 }
 
-                const int clamped = std::clamp(white_score, -cfg.score_clamp, cfg.score_clamp);
-                rec.moves.push_back(ViriMove::from_move(best, clamped));
+                const int clamped  = std::clamp(white_score, -cfg.score_clamp, cfg.score_clamp);
+                bool      filtered = board.in_check() || board.is_capture(best);
+                if (!filtered)
+                    rec.moves.push_back(ViriMove::from_move(best, clamped));
 
                 const int abs_score = std::abs(white_score);
 
