@@ -34,7 +34,7 @@ Official CCRL ratings for each release are listed below.
 | v2.0.0  | -          | -        |
 | v2.1.0  | 3161       | -        |
 | v2.2.0  | 3222       | -        |
-| v3.0.0  | 3279       | 3323     |
+| v3.0.0  | 3279       | 3324     |
 
 ---
 
