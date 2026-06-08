@@ -461,18 +461,6 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
     if (sharedNodes_)
         sharedNodes_->fetch_add(1, std::memory_order_relaxed);
 
-    if ((info_.nodes & ((1 << 15) - 1)) == 0)
-    {
-        if (!isSilent && tm_ && !tm_->is_pondering())
-        {
-            uint64_t reportNodes
-                = sharedNodes_ ? sharedNodes_->load(std::memory_order_relaxed) : info_.nodes;
-            int elapsed = tm_->elapsed_ms();
-            std::cout << "info nodes " << reportNodes << " time " << elapsed << "\n";
-            std::cout.flush();
-        }
-    }
-
     if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
         return 0;
     if (ply >= MAX_PLY - 1)
@@ -632,7 +620,7 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
 }
 
 // ---------------------------------------------------------------------------
-// Negamax alpha-beta
+// Negamax
 // ---------------------------------------------------------------------------
 // Standard negamax with the following layers, in order:
 //   1. TT probe + cutoffs
@@ -653,21 +641,6 @@ int Search::negamax(Board &board,
     ++info_.nodes;
     if (sharedNodes_)
         sharedNodes_->fetch_add(1, std::memory_order_relaxed);
-
-    if ((info_.nodes & ((1 << 17) - 1)) == 0)
-    {
-        if (!isSilent && tm_ && !tm_->is_pondering())
-        {
-            uint64_t reportNodes
-                = sharedNodes_ ? sharedNodes_->load(std::memory_order_relaxed) : info_.nodes;
-            int elapsed = tm_->elapsed_ms();
-            std::cout << "info depth " << info_.depth << " seldepth " << info_.selDepth << " nodes "
-                      << reportNodes << " nps "
-                      << (elapsed > 0 ? int(reportNodes * 1000ULL / uint64_t(elapsed)) : 0)
-                      << " time " << elapsed << " hashfull " << tt.hashfull() << "\n";
-            std::cout.flush();
-        }
-    }
 
     if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
         return 0;
