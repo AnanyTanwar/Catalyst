@@ -1,5 +1,5 @@
 // Catalyst is a UCI compliant chess engine
-//  Copyright (C) 2026 Anany Tanwar
+// Copyright (C) 2026 Anany Tanwar
 
 // Catalyst is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -1367,11 +1367,6 @@ int Search::negamax(Board &board,
             }
             if (!isCapture)
                 update_counter(us, prevMove, m);
-            // Slightly reduce depth after an alpha raise — we now have a tighter bound,
-            // so earlier moves at this depth are less likely to matter.
-            if (alphaRaises == 1 && depth >= ALPHA_RAISE_DEPTH_MIN && depth <= ALPHA_RAISE_DEPTH_MAX
-                && !is_mate_score(beta) && !is_mate_score(alpha))
-                --depth;
         }
 
         if (alpha >= beta)

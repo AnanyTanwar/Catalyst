@@ -33,11 +33,11 @@ namespace Catalyst {
 // LMRTable[isQuiet][depth][moveCount] — precomputed in init_lmr().
 // Formula: base + scale * log(depth) * log(moveCount).
 // Quiet moves use a steeper scale since they're safer to reduce than captures.
-inline constexpr double LMR_QUIET_BASE      = 0.77;
-inline constexpr double LMR_QUIET_SCALE     = 0.40;
-inline constexpr double LMR_NOISY_BASE      = 0.10;
-inline constexpr double LMR_NOISY_SCALE     = 0.30;
-inline constexpr int    LMR_FRAC            = 1024;  // fixed-point denominator for fractional reductions
+inline constexpr double LMR_QUIET_BASE  = 0.77;
+inline constexpr double LMR_QUIET_SCALE = 0.40;
+inline constexpr double LMR_NOISY_BASE  = 0.10;
+inline constexpr double LMR_NOISY_SCALE = 0.30;
+inline constexpr int    LMR_FRAC = 1024;  // fixed-point denominator for fractional reductions
 inline constexpr int    LMR_ROUNDING_CUTOFF = LMR_FRAC / 2;
 inline constexpr int    LMR_HIST_QUIET_DIV  = 8192;
 inline constexpr int    LMR_HIST_NOISY_DIV  = 12288;
@@ -101,10 +101,6 @@ inline constexpr int FIFTY_SCALE_NUM = 220;
 inline constexpr int ZWS_DEEPER_MARGIN    = 50;
 inline constexpr int ZWS_SHALLOWER_MARGIN = 9;
 
-inline constexpr int LMR_ALPHA_RAISE_SCALE = LMR_FRAC / 2;
-inline constexpr int ALPHA_RAISE_DEPTH_MIN = 5;
-inline constexpr int ALPHA_RAISE_DEPTH_MAX = 9;
-
 // IIR: no TT move at sufficient depth = reduce by 1, the search is flying blind.
 inline constexpr int IIR_MIN_DEPTH = 5;
 
@@ -124,30 +120,33 @@ static_assert(LMR_FRAC == 1024, "LMR_FRAC should be 1024");
 struct SearchStack {
     // Squares attacked by the opponent — used for threat-aware history indexing.
     // A move that steps off or onto a threatened square gets a different history bucket.
-    Bitboard             threats          = 0;
-    Move                *pv               = nullptr;
-    Move                 move             = MOVE_NONE;
-    PieceType            movedPt          = NO_PIECE_TYPE;
-    int                  staticEval       = SCORE_NONE;
-    int                  rawEval          = SCORE_NONE;
-    int                  complexity       = 0;   // |staticEval - rawEval|; large means correction history is doing heavy lifting
-    int                  seenMoves        = 0;
-    bool                 playedCap        = false;
-    int                  cutoffCnt        = 0;   // beta cutoffs seen by children; used to bump LMR on siblings
-    int                  reduction        = 0;   // fractional LMR applied this ply, in LMR_FRAC units
-    bool                 ttPv             = false;
-    int                  histScore        = 0;   // history score of the move played here, referenced by parent
-    int                  doubleExtensions = 0;   // inherited double/triple extension count — capped to stop depth spirals
-    ContinuationHistory *contHistEntry    = nullptr;
+    Bitboard  threats    = 0;
+    Move     *pv         = nullptr;
+    Move      move       = MOVE_NONE;
+    PieceType movedPt    = NO_PIECE_TYPE;
+    int       staticEval = SCORE_NONE;
+    int       rawEval    = SCORE_NONE;
+    int       complexity
+        = 0;  // |staticEval - rawEval|; large means correction history is doing heavy lifting
+    int  seenMoves = 0;
+    bool playedCap = false;
+    int  cutoffCnt = 0;  // beta cutoffs seen by children; used to bump LMR on siblings
+    int  reduction = 0;  // fractional LMR applied this ply, in LMR_FRAC units
+    bool ttPv      = false;
+    int  histScore = 0;  // history score of the move played here, referenced by parent
+    int  doubleExtensions
+        = 0;  // inherited double/triple extension count — capped to stop depth spirals
+    ContinuationHistory *contHistEntry = nullptr;
 };
 
 struct SearchInfo {
-    uint64_t nodes         = 0;
-    uint64_t bestMoveNodes = 0;  // nodes spent on the current best move's subtree (for time scaling)
-    int      depth         = 0;
-    int      selDepth      = 0;
-    Move     bestMove      = MOVE_NONE;
-    int      lastScore     = 0;
+    uint64_t nodes = 0;
+    uint64_t bestMoveNodes
+        = 0;  // nodes spent on the current best move's subtree (for time scaling)
+    int  depth     = 0;
+    int  selDepth  = 0;
+    Move bestMove  = MOVE_NONE;
+    int  lastScore = 0;
 
     void reset()
     {
@@ -169,7 +168,7 @@ public:
     Move best_move(Board &board, TimeManager &tm);
 
     Move best_move_result() const { return lastBestMove_; }
-    int  completed_depth() const { return completedDepth_; }  // used by best_thread() to pick winner
+    int completed_depth() const { return completedDepth_; }  // used by best_thread() to pick winner
     uint64_t nodes() const { return info_.nodes; }
     int      last_score() const { return info_.lastScore; }
     void     clear_tables();
@@ -202,16 +201,17 @@ private:
     TimeManager *tm_ = nullptr;
 
     // history_[color][from][to][threat_index]
-    ButterflyHistory    history_;
+    ButterflyHistory history_;
     // pieceToHistory_[color][piece_type][to][threat_index]
-    PieceToHistory      pieceToHistory_;
+    PieceToHistory pieceToHistory_;
     // captureHistory_[color][piece_type][to][captured_type][threat_index]
-    CaptureHistory      captureHistory_;
-    // pawnHistory_[pawn_key_index][piece_type][to] — same move can score differently per pawn structure
-    PawnHistory         pawnHistory_;
+    CaptureHistory captureHistory_;
+    // pawnHistory_[pawn_key_index][piece_type][to] — same move can score differently per pawn
+    // structure
+    PawnHistory pawnHistory_;
     // counterMoves_[color][from][to] — quiet move that last refuted (from->to)
-    Move                counterMoves_[COLOR_NB][SQUARE_NB][SQUARE_NB];
-    Move                killers_[MAX_PLY][2];
+    Move counterMoves_[COLOR_NB][SQUARE_NB][SQUARE_NB];
+    Move killers_[MAX_PLY][2];
     // contHistTable_[color][piece_type][to] — history conditioned on the previous move
     ContinuationHistory contHistTable_[COLOR_NB][PIECE_TYPE_NB][SQUARE_NB];
 
@@ -226,11 +226,12 @@ private:
 
     // Correction history: adjusts NNUE eval based on how wrong it's been in similar positions.
     // Each table slices the position differently; all contributions are summed / CORR_SCALE.
-    int corrMain_[COLOR_NB][CORR_SIZE];           // keyed on XOR of both sides' non-pawn material keys
-    int corrPawn_[COLOR_NB][PAWN_CORR_SIZE];      // keyed on pawn structure hash
+    int corrMain_[COLOR_NB][CORR_SIZE];       // keyed on XOR of both sides' non-pawn material keys
+    int corrPawn_[COLOR_NB][PAWN_CORR_SIZE];  // keyed on pawn structure hash
     int corrNonPawnWhite_[COLOR_NB][NONPAWN_CORR_SIZE];
     int corrNonPawnBlack_[COLOR_NB][NONPAWN_CORR_SIZE];
-    int contCorr_[COLOR_NB][PIECE_TYPE_NB][SQUARE_NB][CONT_CORR_SIZE];  // conditioned on prev move + pawn structure
+    int contCorr_[COLOR_NB][PIECE_TYPE_NB][SQUARE_NB]
+                 [CONT_CORR_SIZE];  // conditioned on prev move + pawn structure
 
     // stack_[ply + 4] — the +4 offset means ss(-4) is always a valid dereference.
     SearchStack            stack_[MAX_PLY + 8];
@@ -269,8 +270,14 @@ private:
         int                             depth,
         bool                            bestIsCap);
 
-    static int  stat_bonus(int depth) { return std::min(STAT_BONUS_MULT * depth + STAT_BONUS_BASE, STAT_BONUS_MAX); }
-    static int  stat_malus(int depth) { return std::min(STAT_MALUS_MULT * depth - STAT_MALUS_BASE, STAT_MALUS_MAX); }
+    static int stat_bonus(int depth)
+    {
+        return std::min(STAT_BONUS_MULT * depth + STAT_BONUS_BASE, STAT_BONUS_MAX);
+    }
+    static int stat_malus(int depth)
+    {
+        return std::min(STAT_MALUS_MULT * depth - STAT_MALUS_BASE, STAT_MALUS_MAX);
+    }
     // e += bonus - e * |bonus| / max — keeps scores bounded without hard clamping.
     static void gravity(int &e, int bonus, int max) { e += bonus - e * std::abs(bonus) / max; }
 
@@ -284,9 +291,9 @@ private:
         PieceType                              movedPt,
         PieceType                              capturedPt,
         Bitboard                               threats) const;
-    void update_killers(Move m, int ply);
-    void update_counter(Color us, Move prevMove, Move reply);
-    void update_quiet_histories(const Board &board,
+    void              update_killers(Move m, int ply);
+    void              update_counter(Color us, Move prevMove, Move reply);
+    void              update_quiet_histories(const Board &board,
         Color                                us,
         Move                                 bestMove,
         PieceType                            bestPt,
@@ -296,7 +303,7 @@ private:
         int                                  triedCount,
         Bitboard                             threats,
         bool                                 improving);
-    void update_capture_histories(const Board &board,
+    void              update_capture_histories(const Board &board,
         Color                                  us,
         Move                                   bestMove,
         PieceType                              bestPt,
