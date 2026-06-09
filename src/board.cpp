@@ -980,12 +980,11 @@ bool Board::is_pseudo_legal(Move m) const
 
 bool Board::is_repetition(int ply) const
 {
-    // Count how many times this position has appeared.
-    // A position seen once before in game history = return true only if
-    // it also occurred within the search tree (ply > 0 means we're in search).
     int end   = std::max(0, historyLen - 1 - st->rule50);
     int start = historyLen - 3;
-    int count = 0;
+    // Positions at index >= searchRoot were made inside the current search tree
+    int searchRoot = historyLen - 1 - ply;  // index of position at root of this search
+    int count      = 0;
 
     for (int i = start; i >= end; i -= 2)
     {
@@ -994,12 +993,10 @@ bool Board::is_repetition(int ply) const
         if (positionHistory[i] == st->key)
         {
             ++count;
-            // First repetition inside search tree = treat as draw
-            // First repetition from game history only = treat as draw too
-            // but only if we've seen it at least once in the current search
             if (count >= 2)
                 return true;
-            if (i >= historyLen - ply)
+            // Single match is a draw only if it's inside the search tree
+            if (i > searchRoot)
                 return true;
         }
     }
