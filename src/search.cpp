@@ -186,37 +186,14 @@ void Search::update_quiet_histories(const Board &board,
         HISTORY_MAX);
     gravity(pawnHistory_[phIdx][bestPt][to_sq(bestMove)], scaledBonus, HISTORY_MAX);
 
-    // "bestBase" normalization for continuation history updates. Without this the
-    // conthist entries for a consistently-good move would grow unboundedly over time.
-    int bestMainHist
-        = (history_[us][from_sq(bestMove)][to_sq(bestMove)]
-                   [threat_index(from_sq(bestMove), to_sq(bestMove), threats)]
-              + pieceToHistory_[us][bestPt][to_sq(bestMove)]
-                               [threat_index(from_sq(bestMove), to_sq(bestMove), threats)])
-          / 2;
-    int bestContHist = 0;
     if (ch1)
-        bestContHist += (*ch1)[bestPt][to_sq(bestMove)];
+        gravity((*ch1)[bestPt][to_sq(bestMove)], scaledBonus, HISTORY_MAX);
     if (ch2)
-        bestContHist += (*ch2)[bestPt][to_sq(bestMove)];
+        gravity((*ch2)[bestPt][to_sq(bestMove)], scaledBonus, HISTORY_MAX);
     if (ch3)
-        bestContHist += (*ch3)[bestPt][to_sq(bestMove)] / 2;
+        gravity((*ch3)[bestPt][to_sq(bestMove)], scaledBonus / 2, HISTORY_MAX);
     if (ch4)
-        bestContHist += (*ch4)[bestPt][to_sq(bestMove)] / 4;
-    int bestBase = bestContHist + bestMainHist / 2;
-
-    if (ch1)
-        (*ch1)[bestPt][to_sq(bestMove)]
-            += scaledBonus - bestBase * std::abs(scaledBonus) / HISTORY_MAX;
-    if (ch2)
-        (*ch2)[bestPt][to_sq(bestMove)]
-            += scaledBonus - bestBase * std::abs(scaledBonus) / HISTORY_MAX;
-    if (ch3)
-        (*ch3)[bestPt][to_sq(bestMove)]
-            += (scaledBonus / 2) - bestBase * std::abs(scaledBonus / 2) / HISTORY_MAX;
-    if (ch4)
-        (*ch4)[bestPt][to_sq(bestMove)]
-            += (scaledBonus / 4) - bestBase * std::abs(scaledBonus / 4) / HISTORY_MAX;
+        gravity((*ch4)[bestPt][to_sq(bestMove)], scaledBonus / 4, HISTORY_MAX);
 
     // Penalize every quiet that was tried before the cutoff move.
     for (int i = 0; i < triedCount; ++i)
@@ -230,30 +207,14 @@ void Search::update_quiet_histories(const Board &board,
         gravity(pieceToHistory_[us][qpt][to_sq(tried[i])][tidx], malus, HISTORY_MAX);
         gravity(pawnHistory_[phIdx][qpt][to_sq(tried[i])], malus, HISTORY_MAX);
 
-        int triedMainHist = (history_[us][from_sq(tried[i])][to_sq(tried[i])][tidx]
-                                + pieceToHistory_[us][qpt][to_sq(tried[i])][tidx])
-                            / 2;
-        int triedContHist = 0;
         if (ch1)
-            triedContHist += (*ch1)[qpt][to_sq(tried[i])];
+            gravity((*ch1)[qpt][to_sq(tried[i])], malus, HISTORY_MAX);
         if (ch2)
-            triedContHist += (*ch2)[qpt][to_sq(tried[i])];
+            gravity((*ch2)[qpt][to_sq(tried[i])], malus, HISTORY_MAX);
         if (ch3)
-            triedContHist += (*ch3)[qpt][to_sq(tried[i])] / 2;
+            gravity((*ch3)[qpt][to_sq(tried[i])], malus / 2, HISTORY_MAX);
         if (ch4)
-            triedContHist += (*ch4)[qpt][to_sq(tried[i])] / 4;
-        int triedBase = triedContHist + triedMainHist / 2;
-
-        if (ch1)
-            (*ch1)[qpt][to_sq(tried[i])] += malus - triedBase * std::abs(malus) / HISTORY_MAX;
-        if (ch2)
-            (*ch2)[qpt][to_sq(tried[i])] += malus - triedBase * std::abs(malus) / HISTORY_MAX;
-        if (ch3)
-            (*ch3)[qpt][to_sq(tried[i])]
-                += (malus / 2) - triedBase * std::abs(malus / 2) / HISTORY_MAX;
-        if (ch4)
-            (*ch4)[qpt][to_sq(tried[i])]
-                += (malus / 4) - triedBase * std::abs(malus / 4) / HISTORY_MAX;
+            gravity((*ch4)[qpt][to_sq(tried[i])], malus / 4, HISTORY_MAX);
     }
 }
 
