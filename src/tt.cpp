@@ -248,7 +248,7 @@ void TTWriter::save(Key key,
     const bool oldGen     = (entry->agePvBound & TT_AGE_MASK) != currentGen;
     const bool deepEnough = depth + 4 + int(isPv) * 2 > entry->get_depth();
 
-    if (!(flag == TT_EXACT || !sameKey || oldGen || deepEnough))
+    if (sameKey && !oldGen && !deepEnough)
     {
         if (move != MOVE_NONE)
             entry->move = uint16_t(move);

@@ -29,10 +29,9 @@ namespace Catalyst {
 constexpr int TT_DEPTH_OFFSET = 7;
 
 // agePvBound layout: [age: 5 bits | isPv: 1 bit | flag: 2 bits]
-constexpr uint8_t TT_AGE_INC    = 8;
-constexpr uint8_t TT_AGE_MASK   = 0xF8;
-constexpr int     TT_AGE_CYCLE  = 256;
-constexpr int     TT_AGE_WEIGHT = TT_AGE_CYCLE / TT_AGE_INC;  // 32
+constexpr uint8_t TT_AGE_INC   = 8;
+constexpr uint8_t TT_AGE_MASK  = 0xF8;
+constexpr int     TT_AGE_CYCLE = 256;
 
 enum TTFlag : uint8_t {
     TT_NONE  = 0,
@@ -145,7 +144,7 @@ private:
     [[nodiscard]] FORCE_INLINE int replacement_score(const TTEntry &e) const
     {
         const int age = (TT_AGE_CYCLE + currentGen - (e.agePvBound & TT_AGE_MASK)) & TT_AGE_MASK;
-        return int(e.depth) - age * TT_AGE_WEIGHT / TT_AGE_INC;
+        return int(e.depth) - age * 8;
     }
 
     void free_table();
