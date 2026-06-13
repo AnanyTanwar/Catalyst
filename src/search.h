@@ -40,7 +40,7 @@ inline constexpr double LMR_NOISY_SCALE = 0.30;
 inline constexpr int    LMR_FRAC = 1024;  // fixed-point denominator for fractional reductions
 inline constexpr int    LMR_ROUNDING_CUTOFF = LMR_FRAC / 2;
 inline constexpr int    LMR_HIST_QUIET_DIV  = 8192;
-inline constexpr int    LMR_HIST_NOISY_DIV  = 12288;
+inline constexpr int    LMR_HIST_NOISY_DIV  = 5693;
 inline constexpr int    LMR_TTPV_REDUCTION  = 2;
 
 // Aspiration windows: start narrow around prev score, widen geometrically on fail.
