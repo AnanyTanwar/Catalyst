@@ -113,6 +113,15 @@ inline constexpr int STAT_MALUS_MAX  = 1047;
 inline constexpr int STAT_MALUS_MULT = 196;
 inline constexpr int STAT_MALUS_BASE = 25;
 
+inline constexpr int CONT_BONUS_MULT = 134;
+inline constexpr int CONT_BONUS_MAX  = 1868;
+inline constexpr int CONT_MALUS_MULT = 259;
+inline constexpr int CONT_MALUS_MAX  = 860;
+inline constexpr int PAWN_BONUS_MULT = 152;
+inline constexpr int PAWN_BONUS_MAX  = 1945;
+inline constexpr int PAWN_MALUS_MULT = 296;
+inline constexpr int PAWN_MALUS_MAX  = 2254;
+
 extern int LMRTable[2][64][64];
 void       init_lmr();
 static_assert(LMR_FRAC == 1024, "LMR_FRAC should be 1024");
