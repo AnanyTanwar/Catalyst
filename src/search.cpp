@@ -164,8 +164,14 @@ void Search::update_quiet_histories(const Board &board,
     Bitboard                                     threats,
     bool                                         improving)
 {
-    int                  bonus = stat_bonus(histDepth);
-    int                  malus = -stat_malus(histDepth);
+    // Separate bonus/malus per table type — each has different scale characteristics
+    int quietBonus = stat_bonus(histDepth);
+    int quietMalus = -stat_malus(histDepth);
+    int contBonus  = std::min(CONT_BONUS_MULT * histDepth + STAT_BONUS_BASE, CONT_BONUS_MAX);
+    int contMalus  = -std::min(CONT_MALUS_MULT * histDepth - STAT_MALUS_BASE, CONT_MALUS_MAX);
+    int pawnBonus  = std::min(PAWN_BONUS_MULT * histDepth + STAT_BONUS_BASE, PAWN_BONUS_MAX);
+    int pawnMalus  = -std::min(PAWN_MALUS_MULT * histDepth - STAT_MALUS_BASE, PAWN_MALUS_MAX);
+
     int                  phIdx = pawn_history_index(board.pawn_key());
     SearchStack         *cur   = ss(ply);
     ContinuationHistory *ch1   = (cur - 1)->contHistEntry;
@@ -173,29 +179,30 @@ void Search::update_quiet_histories(const Board &board,
     ContinuationHistory *ch3   = (cur - 3)->contHistEntry;
     ContinuationHistory *ch4   = (cur - 4)->contHistEntry;
 
-    // Slightly larger bonus when eval is improving — the move was probably extra good.
-    int scaledBonus = improving ? bonus * 5 / 4 : bonus;
+    // Slightly larger bonus when eval is improving
+    int scaledQuietBonus = improving ? quietBonus * 5 / 4 : quietBonus;
+    int scaledContBonus  = improving ? contBonus * 5 / 4 : contBonus;
+    int scaledPawnBonus  = improving ? pawnBonus * 5 / 4 : pawnBonus;
 
     gravity(history_[us][from_sq(bestMove)][to_sq(bestMove)]
                     [threat_index(from_sq(bestMove), to_sq(bestMove), threats)],
-        scaledBonus,
+        scaledQuietBonus,
         HISTORY_MAX);
     gravity(pieceToHistory_[us][bestPt][to_sq(bestMove)]
                            [threat_index(from_sq(bestMove), to_sq(bestMove), threats)],
-        scaledBonus,
+        scaledQuietBonus,
         HISTORY_MAX);
-    gravity(pawnHistory_[phIdx][bestPt][to_sq(bestMove)], scaledBonus, HISTORY_MAX);
+    gravity(pawnHistory_[phIdx][bestPt][to_sq(bestMove)], scaledPawnBonus, HISTORY_MAX);
 
     if (ch1)
-        gravity((*ch1)[bestPt][to_sq(bestMove)], scaledBonus, HISTORY_MAX);
+        gravity((*ch1)[bestPt][to_sq(bestMove)], scaledContBonus, HISTORY_MAX);
     if (ch2)
-        gravity((*ch2)[bestPt][to_sq(bestMove)], scaledBonus, HISTORY_MAX);
+        gravity((*ch2)[bestPt][to_sq(bestMove)], scaledContBonus, HISTORY_MAX);
     if (ch3)
-        gravity((*ch3)[bestPt][to_sq(bestMove)], scaledBonus / 2, HISTORY_MAX);
+        gravity((*ch3)[bestPt][to_sq(bestMove)], scaledContBonus / 2, HISTORY_MAX);
     if (ch4)
-        gravity((*ch4)[bestPt][to_sq(bestMove)], scaledBonus / 4, HISTORY_MAX);
+        gravity((*ch4)[bestPt][to_sq(bestMove)], scaledContBonus / 4, HISTORY_MAX);
 
-    // Penalize every quiet that was tried before the cutoff move.
     for (int i = 0; i < triedCount; ++i)
     {
         if (tried[i] == bestMove)
@@ -203,18 +210,18 @@ void Search::update_quiet_histories(const Board &board,
         PieceType qpt  = piece_type(board.piece_on(from_sq(tried[i])));
         int       tidx = threat_index(from_sq(tried[i]), to_sq(tried[i]), threats);
 
-        gravity(history_[us][from_sq(tried[i])][to_sq(tried[i])][tidx], malus, HISTORY_MAX);
-        gravity(pieceToHistory_[us][qpt][to_sq(tried[i])][tidx], malus, HISTORY_MAX);
-        gravity(pawnHistory_[phIdx][qpt][to_sq(tried[i])], malus, HISTORY_MAX);
+        gravity(history_[us][from_sq(tried[i])][to_sq(tried[i])][tidx], quietMalus, HISTORY_MAX);
+        gravity(pieceToHistory_[us][qpt][to_sq(tried[i])][tidx], quietMalus, HISTORY_MAX);
+        gravity(pawnHistory_[phIdx][qpt][to_sq(tried[i])], pawnMalus, HISTORY_MAX);
 
         if (ch1)
-            gravity((*ch1)[qpt][to_sq(tried[i])], malus, HISTORY_MAX);
+            gravity((*ch1)[qpt][to_sq(tried[i])], contMalus, HISTORY_MAX);
         if (ch2)
-            gravity((*ch2)[qpt][to_sq(tried[i])], malus, HISTORY_MAX);
+            gravity((*ch2)[qpt][to_sq(tried[i])], contMalus, HISTORY_MAX);
         if (ch3)
-            gravity((*ch3)[qpt][to_sq(tried[i])], malus / 2, HISTORY_MAX);
+            gravity((*ch3)[qpt][to_sq(tried[i])], contMalus / 2, HISTORY_MAX);
         if (ch4)
-            gravity((*ch4)[qpt][to_sq(tried[i])], malus / 4, HISTORY_MAX);
+            gravity((*ch4)[qpt][to_sq(tried[i])], contMalus / 4, HISTORY_MAX);
     }
 }
 
