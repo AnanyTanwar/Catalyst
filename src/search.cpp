@@ -164,6 +164,10 @@ void Search::update_quiet_histories(const Board &board,
     Bitboard                                     threats,
     bool                                         improving)
 {
+    // Skip trivial single-move cutoffs at low depth — signal is too weak to be useful
+    if (triedCount == 1 && histDepth <= 3)
+        return;
+
     // Separate bonus/malus per table type — each has different scale characteristics
     int quietBonus = stat_bonus(histDepth);
     int quietMalus = -stat_malus(histDepth);
