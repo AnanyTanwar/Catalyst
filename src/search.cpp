@@ -323,6 +323,30 @@ bool Search::is_shuffling(Move m, int ply) const
     return false;
 }
 
+bool Search::leads_to_repetition(Board &board, Move m) const
+{
+    StateInfo scratch;
+    board.make_move(m, scratch);
+
+    Key afterKey = board.key();
+    int rule50   = board.rule50_count();
+    int histLen  = board.historyLen;
+
+    bool found = false;
+    int  end   = std::max(0, histLen - 1 - rule50);
+    for (int i = histLen - 2; i >= end; i -= 2)
+    {
+        if (board.positionHistory[i] == afterKey)
+        {
+            found = true;
+            break;
+        }
+    }
+
+    board.unmake_move(m);
+    return found;
+}
+
 // ---------------------------------------------------------------------------
 // Evaluation with correction history and fifty-move scaling
 // ---------------------------------------------------------------------------
@@ -1313,6 +1337,26 @@ int Search::negamax(Board &board,
                 info_.bestMove = m;
         }
 
+        if (rootNode)
+        {
+            bool already = false;
+            for (int ri = 0; ri < rootMoveCount_; ++ri)
+            {
+                if (rootMoves_[ri] == m)
+                {
+                    rootMoveScores_[ri] = score;
+                    already             = true;
+                    break;
+                }
+            }
+            if (!already && rootMoveCount_ < MAX_ROOT_MOVES)
+            {
+                rootMoves_[rootMoveCount_]      = m;
+                rootMoveScores_[rootMoveCount_] = score;
+                ++rootMoveCount_;
+            }
+        }
+
         if (score > alpha)
         {
             bestMove = m;
@@ -1486,6 +1530,7 @@ Move Search::best_move(Board &board, TimeManager &tm)
         info_.selDepth = 0;
         info_.depth    = depth;
         savedPV        = PvList { };
+        rootMoveCount_ = 0;
 
         int score = 0;
 
@@ -1563,6 +1608,34 @@ Move Search::best_move(Board &board, TimeManager &tm)
                 board.unmake_move(info_.bestMove);
                 if (stalemates)
                     continue;
+            }
+
+            // Draw avoidance: if our chosen move repeats an earlier REAL game position
+            // and we're meaningfully ahead, prefer a non-repeating alternative that's
+            // within a small margin of the same score.
+            constexpr int DRAW_AVOID_THRESHOLD = 60;  // only kicks in when clearly better
+            constexpr int DRAW_AVOID_MARGIN    = 30;  // how much score we're willing to give up
+            if (score > DRAW_AVOID_THRESHOLD && leads_to_repetition(board, info_.bestMove))
+            {
+                Move bestAlt      = MOVE_NONE;
+                int  bestAltScore = -SCORE_INFINITE;
+                for (int ri = 0; ri < rootMoveCount_; ++ri)
+                {
+                    if (rootMoves_[ri] == info_.bestMove)
+                        continue;
+                    if (!board.is_legal(rootMoves_[ri]))
+                        continue;
+                    if (leads_to_repetition(board, rootMoves_[ri]))
+                        continue;
+                    if (rootMoveScores_[ri] >= score - DRAW_AVOID_MARGIN
+                        && rootMoveScores_[ri] > bestAltScore)
+                    {
+                        bestAlt      = rootMoves_[ri];
+                        bestAltScore = rootMoveScores_[ri];
+                    }
+                }
+                if (bestAlt != MOVE_NONE)
+                    info_.bestMove = bestAlt;
             }
 
             bool     changed = (info_.bestMove != bestMove);
