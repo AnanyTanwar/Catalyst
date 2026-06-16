@@ -258,6 +258,14 @@ private:
     // Each ply gets its own buffer so nested move pickers don't clobber each other.
     MoveBuffer moveBufs_[MAX_PLY];
 
+    // Root move score tracking — populated during the root move loop in negamax(ply==0).
+    // Lets best_move() pick a non-repeating alternative if the top move repeats a real
+    // game position while we're ahead.
+    static constexpr int MAX_ROOT_MOVES = 256;
+    Move                 rootMoves_[MAX_ROOT_MOVES];
+    int                  rootMoveScores_[MAX_ROOT_MOVES];
+    int                  rootMoveCount_ = 0;
+
     // Temporarily raised during NMP verification to prevent recursive null moves.
     int nmpMinPly_ = 0;
 
@@ -333,6 +341,11 @@ private:
     bool opponent_has_winning_capture(const Board &board) const;
     // Detects A->B->A->B patterns — used to suppress SE on shuffling TT moves.
     bool is_shuffling(Move m, int ply) const;
+
+    // True if making move m from the current board leads to a position that has
+    // already occurred earlier in the REAL game (not a hypothetical search-tree line).
+    // Used only at root to steer away from repeating a winning position.
+    bool leads_to_repetition(Board &board, Move m) const;
 
     // Jittered near-zero draw score — tiny variation by node count prevents the engine
     // from being indifferent between all draws, which can cause repetition-hunting bugs.
