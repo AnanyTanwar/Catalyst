@@ -72,6 +72,7 @@ make -j release             # both
 make pgo                    # native CPU
 make pgo ARCH=avx2          # specific arch
 
+# data generation 
 make -j datagen
 
 # misc
