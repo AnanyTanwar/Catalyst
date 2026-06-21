@@ -45,6 +45,11 @@ BASE_FLAGS = \
 	-ffunction-sections -fdata-sections \
 	-O3 -flto=auto -Isrc
 
+# DATAGEN=1 appends -DDATAGEN on top of whatever target is being built
+ifeq ($(DATAGEN),1)
+	BASE_FLAGS += -DDATAGEN
+endif
+
 LDFLAGS_LINUX = -pthread -flto=auto \
                 -static-libgcc -static-libstdc++ \
                 -Wl,--gc-sections \
@@ -97,7 +102,12 @@ endif
 
 CXXFLAGS = $(BASE_FLAGS) $(ARCH_FLAGS)
 
-NNUE_OBJ = $(BUILD_DIR)/nnue_embed.o
+# Keyed by OBJ_FMT, not SUFFIX: the embedded NNUE object's *bytes* only
+# depend on the binary container format (elf64-x86-64 vs pe-x86-64), not on
+# which arch target is being built. Keying by SUFFIX would rebuild this
+# identical object once per arch target for nothing; keying by OBJ_FMT means
+# at most 2 ever exist (one per OS) and both are always valid to reuse.
+NNUE_OBJ = $(BUILD_DIR)/nnue_embed_$(OBJ_FMT).o
 
 $(NNUE_FILE):
 	@if command -v curl >/dev/null 2>&1; then \
@@ -145,7 +155,7 @@ endef
         linux-x86-64 linux-sse41 linux-avx2 linux-bmi2 linux-avx512 linux-avx512vnni \
         win-x86-64 win-sse41 win-avx2 win-bmi2 win-avx512 win-avx512vnni \
         release release-linux release-win \
-        pgo debug sanitize install clean distclean format help
+        pgo debug sanitize datagen install clean distclean format help
 
 all: net linux-x86-64
 
@@ -184,6 +194,16 @@ debug: net
 
 sanitize:
 	$(MAKE) debug SANITIZE="-fsanitize=address,undefined"
+
+# Datagen build: native-optimised binary compiled with -DDATAGEN, which
+# datagen.cpp/.h gate self-play data generation behind. Separate SUFFIX
+# keeps it from clobbering normal native builds in build/bin.
+datagen: net
+	@$(MAKE) -j$(NPROC) $(NNUE_OBJ)
+	@$(MAKE) -j$(NPROC) _build ARCH=native CXX=$(CXX) \
+		CXXFLAGS="$(BASE_FLAGS) $(ARCH_FLAGS) -DDATAGEN" \
+		LDFLAGS="$(LDFLAGS_LINUX)" \
+		SUFFIX=datagen EXT= STRIP_BIN=$(STRIP)
 
 pgo: net
 	@$(MAKE) -j$(NPROC) $(NNUE_OBJ)
@@ -236,6 +256,7 @@ help:
 	@echo "  pgo [ARCH=...]   two-pass PGO build (default: native)"
 	@echo "  debug            O0 + g3, no release flags"
 	@echo "  sanitize         debug + ASan + UBSan"
+	@echo "  datagen          native build with -DDATAGEN (self-play data generation)"
 	@echo "  install          install native binary to PREFIX"
 	@echo "  clean            remove build/ and bin/"
 	@echo "  distclean        clean + remove NNUE file"
@@ -247,6 +268,7 @@ help:
 	@echo "  make -j native"
 	@echo "  make -j pgo ARCH=bmi2"
 	@echo "  make -j release-linux"
+	@echo "  make -j datagen"
 	@echo "  make debug SANITIZE=-fsanitize=address,undefined"
 	@echo "  make install PREFIX=/usr"
 	@echo ""
