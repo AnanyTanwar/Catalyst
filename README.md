@@ -5,12 +5,12 @@ Catalyst is a strong UCI chess engine written in C++20. It combines a neural net
 ## Strength
 
 | Version | CCRL 40/15 | CCRL 2+1 |
-|:--------|:----------:|:--------:|
-| v1.0.0  | —          | 3080     |
-| v2.0.0  | —          | —        |
-| v2.1.0  | 3161       | —        |
-| v2.2.0  | 3222       | —        |
-| v3.0.0  | 3275       | 3324     |
+| :------ | :--------: | :------: |
+| v1.0.0  |     —      |   3080   |
+| v2.0.0  |     —      |    —     |
+| v2.1.0  |    3161    |    —     |
+| v2.2.0  |    3222    |    —     |
+| v3.0.0  |    3275    |   3324   |
 
 ---
 
@@ -20,14 +20,14 @@ Download the latest release from [the releases page](https://github.com/AnanyTan
 
 Choose the binary that matches your CPU:
 
-| Binary | Requirements |
-|:-------|:-------------|
-| `avx512vnni` | AVX-512 + VNNI (Cascade Lake, Zen 4+) |
-| `avx512` | AVX-512 + BMI2 (Ice Lake, Rocket Lake+) |
-| `bmi2` | AVX2 + BMI2 (Haswell+, Zen 3+) |
-| `avx2` | AVX2 (Broadwell+, Excavator+) |
-| `sse41` | SSE4.1 (Core 2 Penryn+, Phenom II+) |
-| `x86-64` | x86-64 + POPCNT |
+| Binary       | Requirements                            |
+| :----------- | :-------------------------------------- |
+| `avx512vnni` | AVX-512 + VNNI (Cascade Lake, Zen 4+)   |
+| `avx512`     | AVX-512 + BMI2 (Ice Lake, Rocket Lake+) |
+| `bmi2`       | AVX2 + BMI2 (Haswell+, Zen 3+)          |
+| `avx2`       | AVX2 (Broadwell+, Excavator+)           |
+| `sse41`      | SSE4.1 (Core 2 Penryn+, Phenom II+)     |
+| `x86-64`     | x86-64 + POPCNT                         |
 
 > **AMD Zen 1 / Zen 2 users:** use `avx2` even if your CPU supports BMI2 — `pext`/`pdep` are microcoded and very slow on these chips.
 
@@ -72,13 +72,15 @@ make -j release             # both
 make pgo                    # native CPU
 make pgo ARCH=avx2          # specific arch
 
+make -j datagen
+
 # misc
 make debug                  # O0 + debug symbols
 make sanitize               # ASan + UBSan
 make install                # installs to /usr/local/bin
 make install PREFIX=/usr
 make clean
-make distclean              # also removes the NNUE file
+make distclean               # also removes the NNUE file
 ```
 
 ## CMake
@@ -94,6 +96,11 @@ To build specific architectures, pass the relevant flags:
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_NATIVE=OFF -DBUILD_AVX2=ON -DBUILD_BMI2=ON
 cmake --build build -j
+```
+
+```bash
+cmake -B build-datagen -DCMAKE_BUILD_TYPE=Release -DCATALYST_DATAGEN=ON
+cmake --build build-datagen -j
 ```
 
 For PGO, run two passes:
