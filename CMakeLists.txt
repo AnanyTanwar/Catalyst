@@ -77,7 +77,7 @@ option(BUILD_AVX2        "Build catalyst-avx2"                           OFF)
 option(BUILD_SSE41       "Build catalyst-sse41  (SSE4.1 + POPCNT)"      OFF)
 option(BUILD_X86_64      "Build catalyst-x86-64 (baseline, no SIMD)"    OFF)
 
-option(CATALYST_DATAGEN  "Enable data-generation mode"                   OFF)
+option(CATALYST_DATAGEN  "Enable data-generation mode (-DDATAGEN)"       OFF)
 option(CATALYST_PGO_GEN  "Instrument binary for PGO (generate profiles)" OFF)
 option(CATALYST_PGO_USE  "Build optimised binary using PGO profiles"     OFF)
 set(CATALYST_PGO_DIR "${CMAKE_BINARY_DIR}/pgo-profiles"
@@ -86,6 +86,13 @@ set(CATALYST_PGO_DIR "${CMAKE_BINARY_DIR}/pgo-profiles"
 if(CATALYST_PGO_GEN AND CATALYST_PGO_USE)
     message(FATAL_ERROR "CATALYST_PGO_GEN and CATALYST_PGO_USE cannot both be ON — "
                         "run PGO_GEN first, then PGO_USE in a separate configure.")
+endif()
+
+# CATALYST_DATAGEN is independent of which arch target(s) are enabled above —
+# it's an orthogonal modifier, same as in the Makefile's `make datagen`.
+# e.g.: cmake -B build -DBUILD_NATIVE=ON -DCATALYST_DATAGEN=ON
+if(CATALYST_DATAGEN)
+    message(STATUS "Data-generation mode enabled (-DDATAGEN) for all targets built this configure")
 endif()
 
 # ── Sources ───────────────────────────────────────────────────────────────────
@@ -161,8 +168,11 @@ function(catalyst_add_target)
         NNUE_EMBEDDED
         CATALYST_VERSION="${CATALYST_VERSION_FULL}"
         CATALYST_NET_NAME="${CATALYST_NET_NAME}"
-        ${ARG_DEFINITIONS}
     )
+
+    if(ARG_DEFINITIONS)
+        target_compile_definitions(${ARG_TARGET_NAME} PRIVATE ${ARG_DEFINITIONS})
+    endif()
 
     if(CATALYST_EMBED_COMMIT)
         target_compile_definitions(${ARG_TARGET_NAME} PRIVATE
@@ -300,7 +310,6 @@ if(BUILD_AVX2)
     catalyst_add_target(
         TARGET_NAME catalyst-avx2
         ARCH_FLAGS  -march=bdver4 -mno-tbm -mno-sse4a -mno-bmi2 -mtune=znver2 -mavx2 -mpopcnt
-        DEFINITIONS ""
     )
 endif()
 
@@ -308,7 +317,6 @@ if(BUILD_SSE41)
     catalyst_add_target(
         TARGET_NAME catalyst-sse41
         ARCH_FLAGS  -march=nehalem -mtune=sandybridge -msse4.1 -mpopcnt -m64
-        DEFINITIONS ""
     )
 endif()
 
@@ -316,7 +324,6 @@ if(BUILD_X86_64)
     catalyst_add_target(
         TARGET_NAME catalyst-x86-64
         ARCH_FLAGS  -march=x86-64 -mpopcnt -m64
-        DEFINITIONS ""
     )
 endif()
 
@@ -333,6 +340,7 @@ message(STATUS "─────────────────────�
 message(STATUS "Catalyst ${CATALYST_VERSION_FULL}  (${CMAKE_BUILD_TYPE})")
 message(STATUS "  Compiler : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "  NNUE     : ${CATALYST_NET_NAME}")
+message(STATUS "  Datagen  : ${CATALYST_DATAGEN}")
 message(STATUS "  Targets  :")
 foreach(_T IN LISTS _ENABLED_TARGETS)
     message(STATUS "    • ${_T}")
