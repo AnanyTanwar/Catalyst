@@ -36,34 +36,120 @@
 
 namespace Catalyst {
 
-[[nodiscard]] static uint64_t perft(Board &board, int depth)
-{
-    if (depth == 0)
-        return 1ULL;
-    MoveList moves = generate_legal(board);
-    if (depth == 1)
-        return uint64_t(moves.size());
-    uint64_t nodes = 0;
-    for (Move m : moves)
+namespace {
+
+    [[nodiscard]] uint64_t perft(Board &board, int depth)
     {
-        StateInfo si;
-        board.make_move(m, si);
-        nodes += perft(board, depth - 1);
-        board.unmake_move(m);
+        if (depth == 0)
+            return 1ULL;
+        MoveList moves = generate_legal(board);
+        if (depth == 1)
+            return uint64_t(moves.size());
+        uint64_t nodes = 0;
+        for (Move m : moves)
+        {
+            StateInfo si;
+            board.make_move(m, si);
+            nodes += perft(board, depth - 1);
+            board.unmake_move(m);
+        }
+        return nodes;
     }
-    return nodes;
+
+}  // namespace
+
+bool UCI::try_parse_int(const std::string &value, int &out)
+{
+    // Manual validation instead of std::stoi + try/catch: this codebase is
+    // built with -fno-exceptions, so throwing/catching isn't available here.
+    if (value.empty())
+        return false;
+
+    size_t i        = 0;
+    bool   negative = false;
+    if (value[0] == '+' || value[0] == '-')
+    {
+        negative = (value[0] == '-');
+        i        = 1;
+    }
+    if (i == value.size())
+        return false;  // just a sign, no digits
+
+    int64_t result = 0;
+    for (; i < value.size(); ++i)
+    {
+        char c = value[i];
+        if (c < '0' || c > '9')
+            return false;  // non-digit, e.g. "64abc"
+        result = result * 10 + (c - '0');
+        if (result > INT64_C(4611686018427387904))  // generous overflow guard, well above INT_MAX
+            return false;
+    }
+
+    if (negative)
+        result = -result;
+    if (result < INT32_MIN || result > INT32_MAX)
+        return false;
+
+    out = int(result);
+    return true;
 }
 
 UCI::UCI()
     : pool_(std::make_unique<ThreadPool>(1))
-    , moveHistory(std::make_unique<StateInfo[]>(1024))
+    , moveHistory_(std::make_unique<StateInfo[]>(kMaxMoveHistory))
 {
     board.set_startpos();
+    register_commands();
 }
 
 UCI::~UCI()
 {
     join_search();
+}
+
+void UCI::register_commands()
+{
+    commands_["uci"]     = [this](auto &iss) { cmd_uci(iss); };
+    commands_["isready"] = [this](auto &iss) {
+        join_search();
+        cmd_isready(iss);
+    };
+    commands_["ucinewgame"] = [this](auto &iss) {
+        join_search();
+        cmd_ucinewgame(iss);
+    };
+    commands_["position"] = [this](auto &iss) {
+        join_search();
+        cmd_position(iss);
+    };
+    commands_["go"]        = [this](auto &iss) { cmd_go(iss); };
+    commands_["stop"]      = [this](auto &iss) { cmd_stop(iss); };
+    commands_["ponderhit"] = [this](auto &iss) { cmd_ponderhit(iss); };
+    commands_["setoption"] = [this](auto &iss) { cmd_setoption(iss); };
+    commands_["bench"]     = [this](auto &iss) {
+        join_search();
+        cmd_bench(iss);
+    };
+    commands_["d"] = [this](auto &iss) {
+        join_search();
+        cmd_display(iss);
+    };
+    commands_["perft"] = [this](auto &iss) {
+        join_search();
+        cmd_perft(iss);
+    };
+    commands_["eval"] = [this](auto &iss) {
+        join_search();
+        cmd_eval(iss);
+    };
+    commands_["datagen"] = [this](auto &iss) {
+        join_search();
+        cmd_datagen(iss);
+    };
+    // "quit" is intentionally NOT registered here. It's handled directly
+    // in loop() because it needs to terminate the read loop itself, not
+    // just execute a side effect like every other command.
 }
 
 void UCI::join_search()
@@ -83,66 +169,21 @@ void UCI::loop()
         if (!(iss >> token))
             continue;
 
-        if (token == "uci")
-            cmd_uci();
-        else if (token == "isready")
+        if (token == "quit")
         {
-            join_search();
-            cmd_isready();
-        }
-        else if (token == "ucinewgame")
-        {
-            join_search();
-            cmd_ucinewgame();
-        }
-        else if (token == "position")
-        {
-            join_search();
-            cmd_position(iss);
-        }
-        else if (token == "go")
-            cmd_go(iss);
-        else if (token == "stop")
-            cmd_stop();
-        else if (token == "ponderhit")
-            cmd_ponderhit();
-        else if (token == "setoption")
-            cmd_setoption(iss);
-        else if (token == "bench")
-        {
-            join_search();
-            cmd_bench(iss);
-        }
-        else if (token == "d")
-        {
-            join_search();
-            cmd_display();
-        }
-        else if (token == "perft")
-        {
-            join_search();
-            cmd_perft(iss);
-        }
-        else if (token == "eval")
-        {
-            join_search();
-            cmd_eval();
-        }
-        else if (token == "datagen")
-        {
-            join_search();
-            cmd_datagen(iss);
-        }
-        else if (token == "quit")
-        {
-            cmd_stop();
+            cmd_stop(iss);
             join_search();
             break;
         }
+
+        auto it = commands_.find(token);
+        if (it != commands_.end())
+            it->second(iss);
+        // Unknown tokens are silently ignored per the UCI spec.
     }
 }
 
-void UCI::cmd_uci()
+void UCI::cmd_uci(std::istringstream &)
 {
     int hwThreads = std::max(1, int(std::thread::hardware_concurrency()));
 
@@ -160,27 +201,27 @@ void UCI::cmd_uci()
     std::cout.flush();
 }
 
-void UCI::cmd_isready()
+void UCI::cmd_isready(std::istringstream &)
 {
     std::cout << "readyok\n";
     std::cout.flush();
 }
 
-void UCI::cmd_ucinewgame()
+void UCI::cmd_ucinewgame(std::istringstream &)
 {
     board.set_startpos();
     tt.clear();
     pool_->clear_all();
-    moveHistoryCount = 0;
-    ponderMove_      = MOVE_NONE;
-    isPondering_     = false;
+    moveHistoryCount_ = 0;
+    ponderMove_.store(MOVE_NONE, std::memory_order_relaxed);
+    isPondering_.store(false, std::memory_order_relaxed);
 }
 
 void UCI::cmd_position(std::istringstream &iss)
 {
     pool_->stop_search();
     join_search();
-    moveHistoryCount = 0;
+    moveHistoryCount_ = 0;
     std::string token;
     iss >> token;
 
@@ -203,7 +244,10 @@ void UCI::cmd_position(std::istringstream &iss)
     }
 
     if (token == "moves")
-        apply_moves(iss);
+    {
+        if (!apply_moves(iss))
+            std::cerr << "info string warning: stopped at first illegal/unparseable move\n";
+    }
 }
 
 void UCI::cmd_go(std::istringstream &iss)
@@ -245,28 +289,30 @@ void UCI::cmd_go(std::istringstream &iss)
             limits.ponder = true;
     }
 
-    bool startingPonder = limits.ponder && options.ponder;
-    isPondering_        = startingPonder;
-    ponderStm_          = board.side_to_move();
+    bool startingPonder   = limits.ponder && options.ponder;
+    Move storedPonderMove = ponderMove_.load(std::memory_order_relaxed);
+
+    isPondering_.store(startingPonder, std::memory_order_relaxed);
+    ponderStm_ = board.side_to_move();
 
     bool appliedPonder = false;
-    if (startingPonder && ponderMove_ != MOVE_NONE && board.is_legal(ponderMove_))
+    if (startingPonder && storedPonderMove != MOVE_NONE && board.is_legal(storedPonderMove))
     {
-        board.make_move(ponderMove_, ponderState_);
+        board.make_move(storedPonderMove, ponderState_);
         ponderStm_    = board.side_to_move();
         appliedPonder = true;
     }
     else if (startingPonder)
     {
-        limits.ponder  = false;
-        isPondering_   = false;
+        limits.ponder = false;
+        isPondering_.store(false, std::memory_order_relaxed);
         startingPonder = false;
     }
 
     timeman.init(limits, board.side_to_move(), options.moveOverhead);
     timeman.start_clock();
 
-    Move capturedPonderMove = ponderMove_;
+    Move capturedPonderMove = storedPonderMove;
     bool capturedApplied    = appliedPonder;
 
     searchThread_ = std::thread([this, capturedPonderMove, capturedApplied]() {
@@ -282,7 +328,7 @@ void UCI::cmd_go(std::istringstream &iss)
         if (capturedApplied)
             board.unmake_move(capturedPonderMove);
 
-        isPondering_ = false;
+        isPondering_.store(false, std::memory_order_relaxed);
 
         Move ponder = pool_->ponder_move();
         if (ponder != MOVE_NONE)
@@ -300,7 +346,7 @@ void UCI::cmd_go(std::istringstream &iss)
                 ponder = MOVE_NONE;
             }
         }
-        ponderMove_ = ponder;
+        ponderMove_.store(ponder, std::memory_order_relaxed);
 
         std::cout << "bestmove " << move_to_uci(best);
         if (ponder != MOVE_NONE && options.ponder)
@@ -310,17 +356,17 @@ void UCI::cmd_go(std::istringstream &iss)
     });
 }
 
-void UCI::cmd_ponderhit()
+void UCI::cmd_ponderhit(std::istringstream &iss)
 {
-    if (!isPondering_)
+    if (!isPondering_.load(std::memory_order_relaxed))
     {
-        cmd_stop();
+        cmd_stop(iss);
         return;
     }
     timeman.ponderhit(ponderStm_, options.moveOverhead);
 }
 
-void UCI::cmd_stop()
+void UCI::cmd_stop(std::istringstream &)
 {
     pool_->stop_search();
     join_search();
@@ -338,7 +384,13 @@ void UCI::cmd_setoption(std::istringstream &iss)
 
     if (name == "Hash")
     {
-        int mb = std::clamp(std::stoi(value), 1, 65536);
+        int mb = 0;
+        if (!try_parse_int(value, mb))
+        {
+            std::cerr << "info string warning: invalid Hash value '" << value << "'\n";
+            return;
+        }
+        mb = std::clamp(mb, 1, 65536);
         if (mb != options.hashSizeMB)
         {
             options.hashSizeMB = mb;
@@ -352,7 +404,13 @@ void UCI::cmd_setoption(std::istringstream &iss)
     }
     else if (name == "Move Overhead")
     {
-        options.moveOverhead = std::max(0, std::stoi(value));
+        int overhead = 0;
+        if (!try_parse_int(value, overhead))
+        {
+            std::cerr << "info string warning: invalid Move Overhead value '" << value << "'\n";
+            return;
+        }
+        options.moveOverhead = std::max(0, overhead);
     }
     else if (name == "Ponder")
     {
@@ -360,8 +418,14 @@ void UCI::cmd_setoption(std::istringstream &iss)
     }
     else if (name == "Threads")
     {
+        int n = 0;
+        if (!try_parse_int(value, n))
+        {
+            std::cerr << "info string warning: invalid Threads value '" << value << "'\n";
+            return;
+        }
         int hw = std::max(1, int(std::thread::hardware_concurrency()));
-        int n  = std::clamp(std::stoi(value), 1, hw);
+        n      = std::clamp(n, 1, hw);
         if (n != options.threads)
         {
             options.threads = n;
@@ -377,15 +441,23 @@ void UCI::cmd_setoption(std::istringstream &iss)
 
 void UCI::cmd_bench(std::istringstream &iss)
 {
-    int         benchDepth = 13;
-    int         threads    = 0;
+    int         benchDepth = kDefaultBenchDepth;
+    int         threads    = options.threads;
     std::string token;
     while (iss >> token)
     {
-        if (token == "depth" && (iss >> benchDepth))
-            continue;
-        if (token == "threads" && (iss >> threads))
-            continue;
+        if (token == "depth")
+        {
+            int d;
+            if (iss >> d)
+                benchDepth = d;
+        }
+        else if (token == "threads")
+        {
+            int t;
+            if (iss >> t)
+                threads = t;
+        }
     }
 
     auto result = Benchmark::run(benchDepth, threads);
@@ -393,12 +465,12 @@ void UCI::cmd_bench(std::istringstream &iss)
     board.set_startpos();
 }
 
-void UCI::cmd_display()
+void UCI::cmd_display(std::istringstream &)
 {
     board.display();
 }
 
-void UCI::cmd_eval()
+void UCI::cmd_eval(std::istringstream &)
 {
     int score = NNUE::evaluate(board);
     std::cout << "NNUE eval (STM): " << score << " cp\n";
@@ -436,30 +508,32 @@ void UCI::cmd_perft(std::istringstream &iss)
     std::cout.flush();
 }
 
-void UCI::apply_moves(std::istringstream &iss)
+bool UCI::apply_moves(std::istringstream &iss)
 {
     std::string moveStr;
     while (iss >> moveStr)
     {
-        if (moveHistoryCount >= 1024)
+        if (moveHistoryCount_ >= kMaxMoveHistory)
         {
-            std::cerr << "Warning: move history overflow\n";
-            break;
+            std::cerr << "info string warning: move history overflow (limit " << kMaxMoveHistory
+                      << ")\n";
+            return false;
         }
-        MoveList legal = generate_legal(board);
+        MoveList moves = generate_legal(board);
         bool     found = false;
-        for (Move m : legal)
+        for (Move m : moves)
         {
             if (move_to_uci(m) == moveStr)
             {
-                board.make_move(m, moveHistory[moveHistoryCount++]);
+                board.make_move(m, moveHistory_[moveHistoryCount_++]);
                 found = true;
                 break;
             }
         }
         if (!found)
-            break;
+            return false;
     }
+    return true;
 }
 
 void UCI::cmd_datagen(std::istringstream &iss)
