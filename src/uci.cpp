@@ -60,8 +60,6 @@ namespace {
 
 bool UCI::try_parse_int(const std::string &value, int &out)
 {
-    // Manual validation instead of std::stoi + try/catch: this codebase is
-    // built with -fno-exceptions, so throwing/catching isn't available here.
     if (value.empty())
         return false;
 
