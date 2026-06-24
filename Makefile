@@ -102,11 +102,6 @@ endif
 
 CXXFLAGS = $(BASE_FLAGS) $(ARCH_FLAGS)
 
-# Keyed by OBJ_FMT, not SUFFIX: the embedded NNUE object's *bytes* only
-# depend on the binary container format (elf64-x86-64 vs pe-x86-64), not on
-# which arch target is being built. Keying by SUFFIX would rebuild this
-# identical object once per arch target for nothing; keying by OBJ_FMT means
-# at most 2 ever exist (one per OS) and both are always valid to reuse.
 NNUE_OBJ = $(BUILD_DIR)/nnue_embed_$(OBJ_FMT).o
 
 $(NNUE_FILE):
