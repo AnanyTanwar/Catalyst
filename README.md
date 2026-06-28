@@ -10,7 +10,7 @@ Catalyst is a strong UCI chess engine written in C++20. It combines a neural net
 | v2.0.0  |     —      |    —     |
 | v2.1.0  |    3161    |    —     |
 | v2.2.0  |    3222    |    —     |
-| v3.0.0  |    3275    |   3324   |
+| v3.0.0  |    3271    |   3324   |
 
 ---
 
