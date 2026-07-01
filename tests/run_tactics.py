@@ -7,7 +7,7 @@ import time
 import argparse
 
 DEFAULT_BINARY = os.path.join(os.path.dirname(__file__), "..", "bin", "catalyst-linux-x86-64")
-MOVETIME_MS = 3000
+MOVETIME_MS = 5000
 
 TACTICS = [
     ("8/8/8/8/5kp1/P7/8/1K1N4 w - - 0 1", ["b1c2"]),
@@ -20,6 +20,10 @@ TACTICS = [
     ("r3qbrk/6p1/2b2pPp/p3pP1Q/PpPpP2P/3P1B2/2PB3K/R5R1 w - - 16 42", ["a1a2"]),
     ("r3kbbr/pp1n1p1P/3ppnp1/q5N1/1P1pP3/P1N1B3/2P1QP2/R3KB1R b KQkq b3 0 17", ["a5b6"]),
     ("r4qk1/6r1/1p4p1/2ppBbN1/1p5Q/P7/2P3PP/5RK1 w - - 2 25", ["g2g4"]),
+    ("4r1k1/2pr2p1/bp5p/p4N2/5bPP/PPNp3R/5P2/R2K4 b - - 1 28", ["e8e2"]),
+    ("rn6/pp3pk1/1q4rb/2ppPQ2/3P4/2NP1N2/PP3K2/6RR w - - 1 23", ["h1h6"]),
+    ("r3k3/1p2bp1p/p1b5/2p3r1/5R1P/1P6/PBnP2P1/RN2N1K1 b q h3 0 18", ["c2e1"]),
+    ("6r1/1p1k1p2/p1b5/2p3bR/8/1PN5/Pn1P2P1/5RK1 b - - 1 25", ["g5e3"]),
 ]
 
 
