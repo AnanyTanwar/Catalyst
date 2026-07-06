@@ -3,7 +3,7 @@ CXX_WIN   ?= x86_64-w64-mingw32-g++-posix
 STRIP     ?= strip
 STRIP_WIN ?= x86_64-w64-mingw32-strip
 EXE        = catalyst
-VERSION    = 3.0.0
+VERSION    = 3.1.0
 
 NNUE_FILE   = catalyst-v2.nnue
 NNUE_DL_URL = https://github.com/AnanyTanwar/CatalystNet/releases/latest/download/$(NNUE_FILE)
