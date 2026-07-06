@@ -235,6 +235,11 @@ private:
 
     MoveBuffer moveBufs_[MAX_PLY];
 
+    static constexpr int MAX_ROOT_MOVES = 256;
+    Move                 rootMoves_[MAX_ROOT_MOVES];
+    int                  rootMoveScores_[MAX_ROOT_MOVES];
+    int                  rootMoveCount_ = 0;
+
     int nmpMinPly_ = 0;
 
     int negamax(Board &board,
@@ -246,6 +251,8 @@ private:
         bool           cutNode,
         Move           excludedMove = MOVE_NONE);
     int quiescence(Board &board, int alpha, int beta, int ply);
+
+    bool leads_to_repetition(Board &board, Move m) const;
 
     int adjusted_eval(const Board &board, int ply);
     // Update all correction history tables after a search completes (if not tactical cutoff).
