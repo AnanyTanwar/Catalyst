@@ -59,7 +59,7 @@ struct alignas(64) StateInfo {
     Piece   capturedPiece;
     uint8_t _pad[7];
 
-    // ADD: Pointer to previous state (forms a stack for unmake_move traversal)
+    // Pointer to previous state (forms a stack for unmake_move traversal)
     StateInfo *previous;
 };
 static_assert(sizeof(StateInfo) == 128, "StateInfo size mismatch — check padding");

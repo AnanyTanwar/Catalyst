@@ -4,21 +4,63 @@ on:
     branches: ["**"]
   pull_request:
     branches: ["**"]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
-  build:
-    name: Build (${{ matrix.arch }})
+  quick:
+    name: Quick (native + test)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update -q && sudo apt-get install -y g++ make
+      - name: Download NNUE
+        run: make net
+      - name: Build + test
+        run: |
+          make -j$(nproc) native
+          echo "bench" | ./bin/catalyst-native
+
+  linux:
+    name: Linux (${{ matrix.arch }})
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86-64, avx2]
+        arch: [x86-64, sse41, avx2, bmi2, avx512, avx512vnni]
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y g++ make binutils
+        run: sudo apt-get update -q && sudo apt-get install -y g++ make
       - name: Download NNUE
         run: make net
       - name: Build
-        run: make linux-${{ matrix.arch }}
+        run: make -j$(nproc) linux-${{ matrix.arch }}
+
+  debug:
+    name: Debug + ASan/UBSan
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update -q && sudo apt-get install -y g++ make
+      - name: Download NNUE
+        run: make net
+      - name: Build + test
+        run: |
+          make -j$(nproc) sanitize
+          echo "bench" | ./bin/catalyst-debug
+
+  clang:
+    name: Clang
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update -q && sudo apt-get install -y clang lld make
+      - name: Download NNUE
+        run: make net
+      - name: Build
+        run: make -j$(nproc) native CXX=clang++ CXXFLAGS="-std=c++20 -O3 -flto=auto -DNDEBUG -DNNUE_EMBEDDED -pthread -fno-exceptions -fno-rtti -Isrc -march=native -Werror"

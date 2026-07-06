@@ -978,17 +978,27 @@ bool Board::is_pseudo_legal(Move m) const
     return true;
 }
 
-bool Board::is_repetition(int /*ply*/) const
+bool Board::is_repetition(int ply) const
 {
     int end   = std::max(0, historyLen - 1 - st->rule50);
     int start = historyLen - 3;
+    // Positions at index >= searchRoot were made inside the current search tree
+    int searchRoot = historyLen - 1 - ply;  // index of position at root of this search
+    int count      = 0;
 
     for (int i = start; i >= end; i -= 2)
     {
         if (i < 0)
             break;
         if (positionHistory[i] == st->key)
-            return true;
+        {
+            ++count;
+            if (count >= 2)
+                return true;
+            // Single match is a draw only if it's inside the search tree
+            if (i > searchRoot)
+                return true;
+        }
     }
     return false;
 }

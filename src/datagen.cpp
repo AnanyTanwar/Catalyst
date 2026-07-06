@@ -220,7 +220,8 @@ namespace Datagen {
             Board board;
             int   sp = 0;
 
-            tt.clear();
+            searcher_white->clear_tables();
+            searcher_black->clear_tables();
 
             if (!book.empty())
             {
@@ -266,7 +267,6 @@ namespace Datagen {
 
                 searcher_white->best_move(board, vtm);
                 const int vscore = searcher_white->last_score();
-                tt.clear();
 
                 if (std::abs(vscore) > cfg.verify_limit)
                     continue;
@@ -325,8 +325,10 @@ namespace Datagen {
                     break;
                 }
 
-                const int clamped = std::clamp(white_score, -cfg.score_clamp, cfg.score_clamp);
-                rec.moves.push_back(ViriMove::from_move(best, clamped));
+                const int clamped  = std::clamp(white_score, -cfg.score_clamp, cfg.score_clamp);
+                bool      filtered = board.in_check() || board.is_capture(best);
+                if (!filtered)
+                    rec.moves.push_back(ViriMove::from_move(best, clamped));
 
                 const int abs_score = std::abs(white_score);
 
@@ -487,8 +489,14 @@ namespace Datagen {
                 iss >> cfg.random_plies_max;
             else if (tok == "winadj")
                 iss >> cfg.win_adj_score;
+            else if (tok == "winadjplies")
+                iss >> cfg.win_adj_plies;
             else if (tok == "drawadjscore")
                 iss >> cfg.draw_adj_score;
+            else if (tok == "drawadjplies")
+                iss >> cfg.draw_adj_plies;
+            else if (tok == "drawadjminply")
+                iss >> cfg.draw_adj_min_ply;
             else if (tok == "scoreclamp")
                 iss >> cfg.score_clamp;
             else if (tok == "nodes")

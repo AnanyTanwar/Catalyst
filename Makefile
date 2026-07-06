@@ -28,6 +28,8 @@ BUILD_DIR = build
 BIN_DIR   = bin
 PGO_DIR   = $(BUILD_DIR)/pgo-gen
 
+NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+
 M64         = -m64 -mpopcnt
 MSSE41      = $(M64) -msse -msse2 -mssse3 -msse4.1
 MAVX2       = $(MSSE41) -mbmi -mfma -mavx2
@@ -42,6 +44,11 @@ BASE_FLAGS = \
 	-fomit-frame-pointer -funroll-loops -falign-functions=32 \
 	-ffunction-sections -fdata-sections \
 	-O3 -flto=auto -Isrc
+
+# DATAGEN=1 appends -DDATAGEN on top of whatever target is being built
+ifeq ($(DATAGEN),1)
+	BASE_FLAGS += -DDATAGEN
+endif
 
 LDFLAGS_LINUX = -pthread -flto=auto \
                 -static-libgcc -static-libstdc++ \
@@ -95,7 +102,7 @@ endif
 
 CXXFLAGS = $(BASE_FLAGS) $(ARCH_FLAGS)
 
-NNUE_OBJ = $(BUILD_DIR)/nnue_embed.o
+NNUE_OBJ = $(BUILD_DIR)/nnue_embed_$(OBJ_FMT).o
 
 $(NNUE_FILE):
 	@if command -v curl >/dev/null 2>&1; then \
@@ -132,64 +139,50 @@ _build: $(OBJS)
 
 -include $(DEPENDS)
 
+# macro: $(1)=ARCH $(2)=SUFFIX $(3)=CXX $(4)=LDFLAGS $(5)=EXT $(6)=OBJ_FMT_OVERRIDE $(7)=STRIP_BIN
+define BUILD_TARGET
+$(2): net
+	@$(MAKE) -j$(NPROC) $(NNUE_OBJ) OBJ_FMT=$(if $(6),$(6),$(OBJ_FMT))
+	@$(MAKE) -j$(NPROC) _build ARCH=$(1) CXX=$(3) LDFLAGS="$(4)" SUFFIX=$(2) EXT=$(5) OBJ_FMT=$(if $(6),$(6),$(OBJ_FMT)) STRIP_BIN=$(7)
+endef
+
 .PHONY: all net native \
         linux-x86-64 linux-sse41 linux-avx2 linux-bmi2 linux-avx512 linux-avx512vnni \
         win-x86-64 win-sse41 win-avx2 win-bmi2 win-avx512 win-avx512vnni \
         release release-linux release-win \
-        pgo debug sanitize install clean distclean format help
+        pgo debug sanitize datagen install clean distclean format help
 
 all: net linux-x86-64
 
-native: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=native      CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=native           EXT=    STRIP_BIN=$(STRIP)
+native: net
+	@$(MAKE) -j$(NPROC) $(NNUE_OBJ)
+	@$(MAKE) -j$(NPROC) _build ARCH=native CXX=$(CXX) LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=native EXT= STRIP_BIN=$(STRIP)
 
-linux-x86-64: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=x86-64     CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=linux-x86-64     EXT=    STRIP_BIN=$(STRIP)
+$(eval $(call BUILD_TARGET,x86-64,linux-x86-64,$(CXX),$(LDFLAGS_LINUX),,,$(STRIP)))
+$(eval $(call BUILD_TARGET,sse41,linux-sse41,$(CXX),$(LDFLAGS_LINUX),,,$(STRIP)))
+$(eval $(call BUILD_TARGET,avx2,linux-avx2,$(CXX),$(LDFLAGS_LINUX),,,$(STRIP)))
+$(eval $(call BUILD_TARGET,bmi2,linux-bmi2,$(CXX),$(LDFLAGS_LINUX),,,$(STRIP)))
+$(eval $(call BUILD_TARGET,avx512,linux-avx512,$(CXX),$(LDFLAGS_LINUX),,,$(STRIP)))
+$(eval $(call BUILD_TARGET,avx512vnni,linux-avx512vnni,$(CXX),$(LDFLAGS_LINUX),,,$(STRIP)))
+$(eval $(call BUILD_TARGET,x86-64,win-x86-64,$(CXX_WIN),$(LDFLAGS_WIN),.exe,pe-x86-64,$(STRIP_WIN)))
+$(eval $(call BUILD_TARGET,sse41,win-sse41,$(CXX_WIN),$(LDFLAGS_WIN),.exe,pe-x86-64,$(STRIP_WIN)))
+$(eval $(call BUILD_TARGET,avx2,win-avx2,$(CXX_WIN),$(LDFLAGS_WIN),.exe,pe-x86-64,$(STRIP_WIN)))
+$(eval $(call BUILD_TARGET,bmi2,win-bmi2,$(CXX_WIN),$(LDFLAGS_WIN),.exe,pe-x86-64,$(STRIP_WIN)))
+$(eval $(call BUILD_TARGET,avx512,win-avx512,$(CXX_WIN),$(LDFLAGS_WIN),.exe,pe-x86-64,$(STRIP_WIN)))
+$(eval $(call BUILD_TARGET,avx512vnni,win-avx512vnni,$(CXX_WIN),$(LDFLAGS_WIN),.exe,pe-x86-64,$(STRIP_WIN)))
 
-linux-sse41: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=sse41      CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=linux-sse41      EXT=    STRIP_BIN=$(STRIP)
+release-linux: linux-x86-64 linux-sse41 linux-avx2 linux-bmi2 linux-avx512 linux-avx512vnni
 
-linux-avx2: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=avx2       CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=linux-avx2       EXT=    STRIP_BIN=$(STRIP)
-
-linux-bmi2: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=bmi2       CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=linux-bmi2       EXT=    STRIP_BIN=$(STRIP)
-
-linux-avx512: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=avx512     CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=linux-avx512     EXT=    STRIP_BIN=$(STRIP)
-
-linux-avx512vnni: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=avx512vnni CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=linux-avx512vnni EXT=    STRIP_BIN=$(STRIP)
-
-win-x86-64: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=x86-64     CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-x86-64     EXT=.exe OBJ_FMT=pe-x86-64 STRIP_BIN=$(STRIP_WIN)
-
-win-sse41: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=sse41      CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-sse41      EXT=.exe OBJ_FMT=pe-x86-64 STRIP_BIN=$(STRIP_WIN)
-
-win-avx2: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=avx2       CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-avx2       EXT=.exe OBJ_FMT=pe-x86-64 STRIP_BIN=$(STRIP_WIN)
-
-win-bmi2: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=bmi2       CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-bmi2       EXT=.exe OBJ_FMT=pe-x86-64 STRIP_BIN=$(STRIP_WIN)
-
-win-avx512: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=avx512     CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-avx512     EXT=.exe OBJ_FMT=pe-x86-64 STRIP_BIN=$(STRIP_WIN)
-
-win-avx512vnni: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=avx512vnni CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-avx512vnni EXT=.exe OBJ_FMT=pe-x86-64 STRIP_BIN=$(STRIP_WIN)
-
-release-linux: net $(NNUE_OBJ) linux-x86-64 linux-sse41 linux-avx2 linux-bmi2 linux-avx512 linux-avx512vnni
-
-release-win: net $(NNUE_OBJ) win-x86-64 win-sse41 win-avx2 win-bmi2 win-avx512 win-avx512vnni
+release-win: win-x86-64 win-sse41 win-avx2 win-bmi2 win-avx512 win-avx512vnni
 
 release: release-linux release-win
 
 DEBUG_FLAGS = -std=c++20 -O0 -g3 -Wall -Wextra -Wshadow -Wcast-qual \
               -pthread -DDEBUG -DNNUE_EMBEDDED -Isrc $(SANITIZE)
 
-debug: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=x86-64 CXX=$(CXX) \
+debug: net
+	@$(MAKE) -j$(NPROC) $(NNUE_OBJ)
+	@$(MAKE) -j$(NPROC) _build ARCH=x86-64 CXX=$(CXX) \
 		CXXFLAGS="$(DEBUG_FLAGS)" \
 		LDFLAGS="-pthread $(SANITIZE)" \
 		SUFFIX=debug EXT= STRIP_BIN=true
@@ -197,19 +190,30 @@ debug: net $(NNUE_OBJ)
 sanitize:
 	$(MAKE) debug SANITIZE="-fsanitize=address,undefined"
 
-pgo: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=$(or $(ARCH),native) CXX=$(CXX) \
+# Datagen build: native-optimised binary compiled with -DDATAGEN, which
+# datagen.cpp/.h gate self-play data generation behind. Separate SUFFIX
+# keeps it from clobbering normal native builds in build/bin.
+datagen: net
+	@$(MAKE) -j$(NPROC) $(NNUE_OBJ)
+	@$(MAKE) -j$(NPROC) _build ARCH=native CXX=$(CXX) \
+		CXXFLAGS="$(BASE_FLAGS) $(ARCH_FLAGS) -DDATAGEN" \
+		LDFLAGS="$(LDFLAGS_LINUX)" \
+		SUFFIX=datagen EXT= STRIP_BIN=$(STRIP)
+
+pgo: net
+	@$(MAKE) -j$(NPROC) $(NNUE_OBJ)
+	@$(MAKE) -j$(NPROC) _build ARCH=$(or $(ARCH),native) CXX=$(CXX) \
 		CXXFLAGS="$(CXXFLAGS) -fprofile-generate=$(PGO_DIR)" \
 		LDFLAGS="$(LDFLAGS_LINUX) -fprofile-generate=$(PGO_DIR)" \
 		SUFFIX=pgo-gen EXT= STRIP_BIN=true
-	./$(BIN_DIR)/$(EXE)-pgo-gen bench
-	./$(BIN_DIR)/$(EXE)-pgo-gen perft 6
-	./$(BIN_DIR)/$(EXE)-pgo-gen go movetime 1000
-	./$(BIN_DIR)/$(EXE)-pgo-gen go movetime 5000
-	./$(BIN_DIR)/$(EXE)-pgo-gen go movetime 10000
-	./$(BIN_DIR)/$(EXE)-pgo-gen go depth 12
-	./$(BIN_DIR)/$(EXE)-pgo-gen go depth 16
-	$(MAKE) _build ARCH=$(or $(ARCH),native) CXX=$(CXX) \
+	printf "bench\nquit\n"             | ./$(BIN_DIR)/$(EXE)-pgo-gen
+	printf "perft 6\nquit\n"           | ./$(BIN_DIR)/$(EXE)-pgo-gen
+	printf "go movetime 1000\nquit\n"  | ./$(BIN_DIR)/$(EXE)-pgo-gen
+	printf "go movetime 5000\nquit\n"  | ./$(BIN_DIR)/$(EXE)-pgo-gen
+	printf "go movetime 10000\nquit\n" | ./$(BIN_DIR)/$(EXE)-pgo-gen
+	printf "go depth 12\nquit\n"       | ./$(BIN_DIR)/$(EXE)-pgo-gen
+	printf "go depth 16\nquit\n"       | ./$(BIN_DIR)/$(EXE)-pgo-gen
+	@$(MAKE) -j$(NPROC) _build ARCH=$(or $(ARCH),native) CXX=$(CXX) \
 		CXXFLAGS="$(CXXFLAGS) -fprofile-use=$(PGO_DIR) -Wno-missing-profile" \
 		LDFLAGS="$(LDFLAGS_LINUX) -fprofile-use=$(PGO_DIR)" \
 		SUFFIX=pgo EXT= STRIP_BIN=$(STRIP)
@@ -247,6 +251,7 @@ help:
 	@echo "  pgo [ARCH=...]   two-pass PGO build (default: native)"
 	@echo "  debug            O0 + g3, no release flags"
 	@echo "  sanitize         debug + ASan + UBSan"
+	@echo "  datagen          native build with -DDATAGEN (self-play data generation)"
 	@echo "  install          install native binary to PREFIX"
 	@echo "  clean            remove build/ and bin/"
 	@echo "  distclean        clean + remove NNUE file"
@@ -258,6 +263,7 @@ help:
 	@echo "  make -j native"
 	@echo "  make -j pgo ARCH=bmi2"
 	@echo "  make -j release-linux"
+	@echo "  make -j datagen"
 	@echo "  make debug SANITIZE=-fsanitize=address,undefined"
 	@echo "  make install PREFIX=/usr"
 	@echo ""

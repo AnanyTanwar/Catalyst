@@ -23,30 +23,22 @@
 namespace Catalyst {
 
 struct BenchmarkResult {
-    int                      depth;
-    int                      threads;
-    uint64_t                 totalNodes;
-    int                      timeMs;
-    int                      nps;
-    std::vector<std::string> bestMoves;
-    std::vector<uint64_t>    positionNodes;
-    std::vector<int>         positionTimes;
+    int      depth;
+    int      threads;
+    uint64_t totalNodes;
 };
 
 class Benchmark {
 public:
-    static BenchmarkResult run(int depth, int threads = 0);
-    static BenchmarkResult run_custom(const std::vector<std::string> &fens,
+    static BenchmarkResult                 run(int depth, int threads = 0);
+    static BenchmarkResult                 run_custom(const std::vector<std::string> &fens,
         int                                                           depth,
         int                                                           threads = 0);
-    static void            print_results(const BenchmarkResult &result, bool verbose = true);
+    static void                            print_results(const BenchmarkResult &result);
     static const std::vector<std::string> &default_positions();
 
 private:
-    static uint64_t run_position(const std::string &fen,
-        int                                         depth,
-        int                                         threads,
-        std::string                                &bestMove);
+    static uint64_t run_position(const std::string &fen, int depth, int threads);
 };
 
 }  // namespace Catalyst

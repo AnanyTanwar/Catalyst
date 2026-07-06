@@ -47,7 +47,9 @@ void init_lmr()
         }
 }
 
-Search::Search()
+Search::Search(int threadIdx, std::atomic<bool> *poolStop)
+    : threadIdx_(threadIdx)
+    , poolStop_(poolStop)
 {
     init_lmr();
     clear_tables();
@@ -455,7 +457,7 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
     if (sharedNodes_)
         sharedNodes_->fetch_add(1, std::memory_order_relaxed);
 
-    if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+    if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
         return 0;
     if (ply >= MAX_PLY - 1)
         return adjusted_eval(board, ply);
@@ -573,7 +575,7 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
         accStack_.pop();
         --stateSP_;
 
-        if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+        if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
             return 0;
 
         if (score > bestScore)
@@ -593,7 +595,7 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
     if (bestScore >= beta && !is_mate_score(bestScore) && !is_mate_score(beta))
         bestScore = ilerp(bestScore, beta, QS_FAILHIGH_LERP);
 
-    if (moveCount > 0 && !(stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes)))
+    if (moveCount > 0 && !(is_stopped() || (tm_ && tm_->time_up(info_.nodes)))
         && std::abs(bestScore) < SCORE_INFINITE)
     {
         TTFlag flag = (bestScore >= beta) ? TT_LOWER : TT_UPPER;
@@ -635,7 +637,7 @@ int Search::negamax(Board &board,
     if (sharedNodes_)
         sharedNodes_->fetch_add(1, std::memory_order_relaxed);
 
-    if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+    if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
         return 0;
     if (ply >= MAX_PLY - 1)
         return adjusted_eval(board, ply);
@@ -894,7 +896,8 @@ int Search::negamax(Board &board,
 
         // Reverse futility pruning: static eval is so far above beta that we're
         // almost certainly going to beat it — skip the search.
-        if (depth < RFP_MAX_DEPTH && !is_mate_score(staticEval))
+        if (depth < RFP_MAX_DEPTH && !is_mate_score(staticEval) && !cur->ttPv
+            && (ttMove == MOVE_NONE || board.is_capture_or_promotion(ttMove)))
         {
             int margin = RFP_MARGIN_MULT * depth - (improving ? 80 : 0)
                          - (opponentWorsening ? 20 : 0) - prevHistScore / RFP_HIST_DIV;
@@ -906,9 +909,9 @@ int Search::negamax(Board &board,
         // If they STILL can't beat beta, our position is overwhelming.
         // Guards: requires major/minor pieces (avoid zugzwang), depth >= 3,
         //         and eval well above beta.
-        if (!pvNode && depth >= 3 && staticEval >= beta
+        if (cutNode && depth >= 3 && staticEval >= beta
             && staticEval >= beta + NMP_BETA_BASE - NMP_BETA_MULT * depth
-            && (cur - 1)->move != MOVE_NONE && ply >= nmpMinPly_
+            && (ply == 0 || (cur - 1)->move != MOVE_NONE) && ply >= nmpMinPly_
             && (board.pieces(KNIGHT, board.side_to_move())
                 | board.pieces(BISHOP, board.side_to_move())
                 | board.pieces(ROOK, board.side_to_move())
@@ -933,7 +936,7 @@ int Search::negamax(Board &board,
                 accStack_.pop();
                 --stateSP_;
 
-                if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+                if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
                     return 0;
 
                 if (nullScore >= beta)
@@ -1000,7 +1003,7 @@ int Search::negamax(Board &board,
             accStack_.pop();
             --stateSP_;
 
-            if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+            if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
                 return 0;
 
             if (pcScore >= pcBeta)
@@ -1327,7 +1330,7 @@ int Search::negamax(Board &board,
         --stateSP_;
         accStack_.pop();
 
-        if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+        if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
             return 0;
 
         if (score > bestScore)
@@ -1457,11 +1460,11 @@ int Search::negamax(Board &board,
     // Correction history update
     bool bestIsCap = (bestMove != MOVE_NONE) && board.is_capture(bestMove);
     if (excludedMove == MOVE_NONE && staticEval != SCORE_NONE
-        && !(stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+        && !(is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
         update_correction(board, ply, cur->staticEval, bestScore, depth, bestIsCap);
 
     // TT store — flag depends on whether we raised alpha or got cut.
-    if (!(stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))) && excludedMove == MOVE_NONE
+    if (!(is_stopped() || (tm_ && tm_->time_up(info_.nodes))) && excludedMove == MOVE_NONE
         && std::abs(bestScore) < SCORE_INFINITE)
     {
         TTFlag flag;
@@ -1498,6 +1501,8 @@ Move Search::best_move(Board &board, TimeManager &tm)
     if (!isSilent)
         tt.new_search();
     info_.reset();
+    completedDepth_ = 0;
+    lastBestMove_   = MOVE_NONE;
 
     // Light reset between moves — preserves history tables since they're valuable
     // across the whole game. Full clear_tables() is only for ucinewgame.
@@ -1520,11 +1525,15 @@ Move Search::best_move(Board &board, TimeManager &tm)
     // Lazy SMP depth perturbation: helper threads start at slightly different depths
     // to explore different parts of the tree and avoid duplicating the main thread's work.
     // Odd-indexed helpers also skip even depths, creating further divergence.
-    for (int depth = 1; depth <= limits.depth; ++depth)
+    const int startDepth = (threadIdx_ == 0)       ? 1
+                           : (threadIdx_ % 2 == 1) ? 1 + (threadIdx_ % 4)
+                                                   : 2 + (threadIdx_ % 4);
+
+    for (int depth = startDepth; depth <= limits.depth; ++depth)
     {
         // Only the main thread drives time-based early exit.
         // Helpers keep going deeper — best_thread() picks the winner.
-        if (!isSilent && !limits.infinite && tm_->soft_limit_reached() && depth > 1)
+        if (threadIdx_ == 0 && !limits.infinite && tm_->soft_limit_reached() && depth > 1)
             break;
 
         info_.selDepth = 0;
@@ -1549,9 +1558,9 @@ Move Search::best_move(Board &board, TimeManager &tm)
             {
                 score = negamax(board, depth, wAlpha, wBeta, 0, true, false);
 
-                if (score == 0 && (stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+                if (score == 0 && (is_stopped() || (tm_ && tm_->time_up(info_.nodes))))
                     break;
-                if (stopped.load(std::memory_order_relaxed))
+                if (is_stopped())
                     break;
 
                 if (score <= wAlpha)
@@ -1591,9 +1600,9 @@ Move Search::best_move(Board &board, TimeManager &tm)
             savedPV = pvTable_[0];
         }
 
-        if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))) && depth > 1)
+        if ((is_stopped() || (tm_ && tm_->time_up(info_.nodes))) && depth > 1)
             break;
-        if (stopped.load(std::memory_order_relaxed) && depth > 1)
+        if (is_stopped() && depth > 1)
             break;
 
         if (info_.bestMove != MOVE_NONE && board.is_legal(info_.bestMove))
@@ -1644,7 +1653,8 @@ Move Search::best_move(Board &board, TimeManager &tm)
                 = sharedNodes_ ? sharedNodes_->load(std::memory_order_relaxed) : info_.nodes;
             // update_scale() modifies time manager internal state — only the main thread
             // owns time management, helpers must never call this.
-            tm_->update_scale(changed, delta, info_.bestMoveNodes, totalNodes, depth, score);
+            if (threadIdx_ == 0)
+                tm_->update_scale(changed, delta, info_.bestMoveNodes, totalNodes, depth, score);
 
             bestMove        = info_.bestMove;
             prevScore       = bestScore;
@@ -1652,6 +1662,7 @@ Move Search::best_move(Board &board, TimeManager &tm)
             info_.lastScore = score;
         }
 
+        completedDepth_ = depth;
 
         if (pvTable_[0].length == 0 && savedPV.length > 0)
             pvTable_[0] = savedPV;
@@ -1664,7 +1675,7 @@ Move Search::best_move(Board &board, TimeManager &tm)
         // Short mate found — no point searching deeper into something already settled.
         if (is_mate_score(bestScore) && std::abs(bestScore) >= SCORE_MATE - 6)
             break;
-        if (!isSilent && !limits.infinite && tm_->soft_limit_reached())
+        if (threadIdx_ == 0 && !limits.infinite && tm_->soft_limit_reached())
             break;
     }
 
@@ -1676,7 +1687,8 @@ Move Search::best_move(Board &board, TimeManager &tm)
             bestMove = *moves.begin();
     }
 
-    tm_ = nullptr;
+    lastBestMove_ = bestMove;
+    tm_           = nullptr;
     return bestMove;
 }
 

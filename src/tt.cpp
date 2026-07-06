@@ -287,4 +287,5 @@ int TT::hashfull() const
 
     return filled * 1000 / int(count * TTCluster::ENTRIES);
 }
-}  // namespace Catalyst
+
+} // namespace Catalyst
