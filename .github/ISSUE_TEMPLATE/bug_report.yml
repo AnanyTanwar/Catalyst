@@ -11,8 +11,8 @@ body:
     id: version
     attributes:
       label: Catalyst Version
-      description: Which version of Catalyst are you using? (e.g. v3.0.0)
-      placeholder: v3.0.0
+      description: Which version of Catalyst are you using? (e.g. v3.1.0)
+      placeholder: v3.1.0
     validations:
       required: true
 
