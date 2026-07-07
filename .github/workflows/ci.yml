@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86-64, avx2]
+        arch: [x86-64, avx2, bmi2, avx512, avx512vnni]
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -22,3 +22,19 @@ jobs:
         run: make net
       - name: Build
         run: make linux-${{ matrix.arch }}
+
+  sanitize:
+    name: Sanitizer (ASan + UBSan)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y g++ make binutils
+      - name: Download NNUE
+        run: make net
+      - name: Build with sanitizers
+        run: make sanitize
+      - name: Run bench under sanitizers
+        run: ./bin/catalyst-debug bench
