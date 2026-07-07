@@ -14,14 +14,12 @@ ifeq ($(OS),Windows_NT)
 	RMDIR   = cmd /C rmdir /S /Q 2>nul
 	MKDIR   = cmd /C mkdir
 	SRCS    = $(shell dir /S /B src\*.cpp 2>nul)
-	OBJ_FMT = pe-x86-64
 else
 	EXT     =
 	RM      = rm -f
 	RMDIR   = rm -rf
 	MKDIR   = mkdir -p
 	SRCS    = $(shell find src -name '*.cpp')
-	OBJ_FMT = elf64-x86-64
 endif
 
 BUILD_DIR = build
@@ -37,7 +35,7 @@ MAVX512VNNI = $(MAVX512) -mavx512vnni -mavx512dq -mavx512vl -DUSE_VNNI
 
 BASE_FLAGS = \
 	-std=c++20 -Wall -Wextra -Wshadow -Wcast-qual \
-	-DNDEBUG -DNNUE_EMBEDDED -pthread \
+	-DNDEBUG -DNNUE_EMBEDDED -DNNUE_NET_PATH=\"$(CURDIR)/$(NNUE_FILE)\" -pthread \
 	-fno-exceptions -fno-rtti \
 	-fomit-frame-pointer -funroll-loops -falign-functions=32 \
 	-ffunction-sections -fdata-sections \
@@ -95,8 +93,6 @@ endif
 
 CXXFLAGS = $(BASE_FLAGS) $(ARCH_FLAGS)
 
-NNUE_OBJ = $(BUILD_DIR)/nnue_embed.o
-
 $(NNUE_FILE):
 	@if command -v curl >/dev/null 2>&1; then \
 		curl -fskL "$(NNUE_DL_URL)" -o "$(NNUE_FILE)"; \
@@ -108,26 +104,18 @@ $(NNUE_FILE):
 
 net: $(NNUE_FILE)
 
-$(NNUE_OBJ): $(NNUE_FILE)
-	@$(MKDIR) $(BUILD_DIR) 2>/dev/null || true
-	objcopy \
-		--input-target=binary \
-		--output-target=$(OBJ_FMT) \
-		--binary-architecture=i386:x86-64 \
-		$(NNUE_FILE) $(NNUE_OBJ)
-
 OBJS    = $(patsubst src/%.cpp,$(BUILD_DIR)/$(SUFFIX)/%.o,$(SRCS))
 DEPENDS = $(OBJS:.o=.d)
 
 .DELETE_ON_ERROR:
 
-$(BUILD_DIR)/$(SUFFIX)/%.o: src/%.cpp | $(NNUE_OBJ)
+$(BUILD_DIR)/$(SUFFIX)/%.o: src/%.cpp | $(NNUE_FILE)
 	@$(MKDIR) $(dir $@) 2>/dev/null || true
 	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
 _build: $(OBJS)
 	@$(MKDIR) $(BIN_DIR) 2>/dev/null || true
-	$(CXX) $(CXXFLAGS) $(OBJS) $(NNUE_OBJ) $(LDFLAGS) -o $(BIN_DIR)/$(EXE)-$(SUFFIX)$(EXT)
+	$(CXX) $(CXXFLAGS) $(OBJS) $(LDFLAGS) -o $(BIN_DIR)/$(EXE)-$(SUFFIX)$(EXT)
 	@$(STRIP_BIN) $(BIN_DIR)/$(EXE)-$(SUFFIX)$(EXT) 2>/dev/null || true
 
 -include $(DEPENDS)
@@ -140,55 +128,55 @@ _build: $(OBJS)
 
 all: net linux-x86-64
 
-native: net $(NNUE_OBJ)
+native: net
 	$(MAKE) _build ARCH=native      CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=native           EXT=    STRIP_BIN=$(STRIP)
 
-linux-x86-64: net $(NNUE_OBJ)
+linux-x86-64: net
 	$(MAKE) _build ARCH=x86-64     CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=linux-x86-64     EXT=    STRIP_BIN=$(STRIP)
 
-linux-sse41: net $(NNUE_OBJ)
+linux-sse41: net
 	$(MAKE) _build ARCH=sse41      CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=linux-sse41      EXT=    STRIP_BIN=$(STRIP)
 
-linux-avx2: net $(NNUE_OBJ)
+linux-avx2: net
 	$(MAKE) _build ARCH=avx2       CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=linux-avx2       EXT=    STRIP_BIN=$(STRIP)
 
-linux-bmi2: net $(NNUE_OBJ)
+linux-bmi2: net
 	$(MAKE) _build ARCH=bmi2       CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=linux-bmi2       EXT=    STRIP_BIN=$(STRIP)
 
-linux-avx512: net $(NNUE_OBJ)
+linux-avx512: net
 	$(MAKE) _build ARCH=avx512     CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=linux-avx512     EXT=    STRIP_BIN=$(STRIP)
 
-linux-avx512vnni: net $(NNUE_OBJ)
+linux-avx512vnni: net
 	$(MAKE) _build ARCH=avx512vnni CXX=$(CXX)     LDFLAGS="$(LDFLAGS_LINUX)" SUFFIX=linux-avx512vnni EXT=    STRIP_BIN=$(STRIP)
 
-win-x86-64: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=x86-64     CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-x86-64     EXT=.exe OBJ_FMT=pe-x86-64 STRIP_BIN=$(STRIP_WIN)
+win-x86-64: net
+	$(MAKE) _build ARCH=x86-64     CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-x86-64     EXT=.exe STRIP_BIN=$(STRIP_WIN)
 
-win-sse41: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=sse41      CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-sse41      EXT=.exe OBJ_FMT=pe-x86-64 STRIP_BIN=$(STRIP_WIN)
+win-sse41: net
+	$(MAKE) _build ARCH=sse41      CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-sse41      EXT=.exe STRIP_BIN=$(STRIP_WIN)
 
-win-avx2: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=avx2       CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-avx2       EXT=.exe OBJ_FMT=pe-x86-64 STRIP_BIN=$(STRIP_WIN)
+win-avx2: net
+	$(MAKE) _build ARCH=avx2       CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-avx2       EXT=.exe STRIP_BIN=$(STRIP_WIN)
 
-win-bmi2: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=bmi2       CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-bmi2       EXT=.exe OBJ_FMT=pe-x86-64 STRIP_BIN=$(STRIP_WIN)
+win-bmi2: net
+	$(MAKE) _build ARCH=bmi2       CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-bmi2       EXT=.exe STRIP_BIN=$(STRIP_WIN)
 
-win-avx512: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=avx512     CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-avx512     EXT=.exe OBJ_FMT=pe-x86-64 STRIP_BIN=$(STRIP_WIN)
+win-avx512: net
+	$(MAKE) _build ARCH=avx512     CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-avx512     EXT=.exe STRIP_BIN=$(STRIP_WIN)
 
-win-avx512vnni: net $(NNUE_OBJ)
-	$(MAKE) _build ARCH=avx512vnni CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-avx512vnni EXT=.exe OBJ_FMT=pe-x86-64 STRIP_BIN=$(STRIP_WIN)
+win-avx512vnni: net
+	$(MAKE) _build ARCH=avx512vnni CXX=$(CXX_WIN) LDFLAGS="$(LDFLAGS_WIN)" SUFFIX=win-avx512vnni EXT=.exe STRIP_BIN=$(STRIP_WIN)
 
-release-linux: net $(NNUE_OBJ) linux-x86-64 linux-sse41 linux-avx2 linux-bmi2 linux-avx512 linux-avx512vnni
+release-linux: net linux-x86-64 linux-sse41 linux-avx2 linux-bmi2 linux-avx512 linux-avx512vnni
 
-release-win: net $(NNUE_OBJ) win-x86-64 win-sse41 win-avx2 win-bmi2 win-avx512 win-avx512vnni
+release-win: net win-x86-64 win-sse41 win-avx2 win-bmi2 win-avx512 win-avx512vnni
 
 release: release-linux release-win
 
 DEBUG_FLAGS = -std=c++20 -O0 -g3 -Wall -Wextra -Wshadow -Wcast-qual \
-              -pthread -DDEBUG -DNNUE_EMBEDDED -Isrc $(SANITIZE)
+              -pthread -DDEBUG -DNNUE_EMBEDDED -DNNUE_NET_PATH=\"$(CURDIR)/$(NNUE_FILE)\" -Isrc $(SANITIZE)
 
-debug: net $(NNUE_OBJ)
+debug: net
 	$(MAKE) _build ARCH=x86-64 CXX=$(CXX) \
 		CXXFLAGS="$(DEBUG_FLAGS)" \
 		LDFLAGS="-pthread $(SANITIZE)" \
@@ -197,7 +185,7 @@ debug: net $(NNUE_OBJ)
 sanitize:
 	$(MAKE) debug SANITIZE="-fsanitize=address,undefined"
 
-pgo: net $(NNUE_OBJ)
+pgo: net
 	$(MAKE) _build ARCH=$(or $(ARCH),native) CXX=$(CXX) \
 		CXXFLAGS="$(CXXFLAGS) -fprofile-generate=$(PGO_DIR)" \
 		LDFLAGS="$(LDFLAGS_LINUX) -fprofile-generate=$(PGO_DIR)" \

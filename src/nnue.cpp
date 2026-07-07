@@ -25,10 +25,8 @@
 #include "simd.h"
 
 #ifdef NNUE_EMBEDDED
-extern "C" {
-extern const uint8_t _binary_catalyst_v2_nnue_start[];
-extern const uint8_t _binary_catalyst_v2_nnue_end[];
-}
+#include "incbin/incbin.h"
+INCBIN(Network, NNUE_NET_PATH);
 #endif
 
 namespace Catalyst {
@@ -44,9 +42,8 @@ namespace NNUE {
                                     + OUTPUT_BUCKETS * sizeof(int16_t);
 
 #ifdef NNUE_EMBEDDED
-        const uint8_t *data = _binary_catalyst_v2_nnue_start;
-        const size_t   size
-            = static_cast<size_t>(_binary_catalyst_v2_nnue_end - _binary_catalyst_v2_nnue_start);
+        const uint8_t *data = gNetworkData;
+        const size_t   size = static_cast<size_t>(gNetworkSize);
 
         if (size < expected)
         {
