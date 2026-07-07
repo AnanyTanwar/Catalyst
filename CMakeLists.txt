@@ -92,38 +92,7 @@ set(CATALYST_SOURCES
 function(catalyst_add_target)
     cmake_parse_arguments(ARG "" "TARGET_NAME" "ARCH_FLAGS;DEFINITIONS" ${ARGN})
 
-    set(NNUE_OBJ_DIR  "${CMAKE_BINARY_DIR}/nnue_embed/${ARG_TARGET_NAME}")
-    set(NNUE_OBJ_FILE "${NNUE_OBJ_DIR}/nnue_embed.o")
-
-    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-        set(OBJ_FMT "pe-x86-64")
-    else()
-        set(OBJ_FMT "elf64-x86-64")
-    endif()
-
-    get_filename_component(NNUE_DIR  "${NNUE_FILE}" DIRECTORY)
-    get_filename_component(NNUE_BASE "${NNUE_FILE}" NAME)
-
-    add_custom_command(
-        OUTPUT  "${NNUE_OBJ_FILE}"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${NNUE_OBJ_DIR}"
-        COMMAND objcopy
-                --input-target=binary
-                --output-target=${OBJ_FMT}
-                --binary-architecture=i386:x86-64
-                "${NNUE_BASE}"
-                "${NNUE_OBJ_FILE}"
-        WORKING_DIRECTORY "${NNUE_DIR}"
-        DEPENDS "${NNUE_FILE}"
-        COMMENT "Embedding NNUE into ${ARG_TARGET_NAME}"
-        VERBATIM
-    )
-
-    add_custom_target(${ARG_TARGET_NAME}_nnue DEPENDS "${NNUE_OBJ_FILE}")
-
     add_executable(${ARG_TARGET_NAME} ${CATALYST_SOURCES})
-    add_dependencies(${ARG_TARGET_NAME} ${ARG_TARGET_NAME}_nnue)
-    target_link_options(${ARG_TARGET_NAME} PRIVATE "${NNUE_OBJ_FILE}")
     target_include_directories(${ARG_TARGET_NAME} PRIVATE src)
 
     target_compile_options(${ARG_TARGET_NAME} PRIVATE
@@ -141,6 +110,7 @@ function(catalyst_add_target)
 
     target_compile_definitions(${ARG_TARGET_NAME} PRIVATE
         NNUE_EMBEDDED
+        NNUE_NET_PATH="${NNUE_FILE}"
         CATALYST_VERSION="${CATALYST_VERSION_FULL}"
         CATALYST_NET_NAME="${CATALYST_NET_NAME}"
         ${ARG_DEFINITIONS}
