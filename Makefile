@@ -91,7 +91,21 @@ else
 	ARCH_FLAGS = -march=$(ARCH)
 endif
 
+ifeq ($(DEBUG),1)
+CXXFLAGS = -std=c++20 -O0 -g3 -Wall -Wextra -Wshadow -Wcast-qual \
+           -pthread -DDEBUG -DNNUE_EMBEDDED -DNNUE_NET_PATH=\"$(CURDIR)/$(NNUE_FILE)\" \
+           -Isrc $(SANITIZE)
+else
 CXXFLAGS = $(BASE_FLAGS) $(ARCH_FLAGS)
+endif
+
+ifeq ($(PGO_GEN),1)
+CXXFLAGS += -fprofile-generate=$(PGO_DIR)
+endif
+
+ifeq ($(PGO_USE),1)
+CXXFLAGS += -fprofile-use=$(PGO_DIR) -Wno-missing-profile
+endif
 
 $(NNUE_FILE):
 	@if command -v curl >/dev/null 2>&1; then \
@@ -173,36 +187,34 @@ release-win: net win-x86-64 win-sse41 win-avx2 win-bmi2 win-avx512 win-avx512vnn
 
 release: release-linux release-win
 
-DEBUG_FLAGS = -std=c++20 -O0 -g3 -Wall -Wextra -Wshadow -Wcast-qual \
-              -pthread -DDEBUG -DNNUE_EMBEDDED -DNNUE_NET_PATH=\"$(CURDIR)/$(NNUE_FILE)\" -Isrc $(SANITIZE)
-
 debug: net
-	$(MAKE) _build ARCH=x86-64 CXX=$(CXX) \
-		CXXFLAGS="$(DEBUG_FLAGS)" \
+	$(MAKE) _build DEBUG=1 ARCH=x86-64 CXX=$(CXX) \
 		LDFLAGS="-pthread $(SANITIZE)" \
 		SUFFIX=debug EXT= STRIP_BIN=true
+	$(CURDIR)/$(BIN_DIR)/$(EXE)-debug$(EXT) bench
 
 sanitize:
 	$(MAKE) debug SANITIZE="-fsanitize=address,undefined"
 
 pgo: net
+	@$(MKDIR) $(PGO_DIR) 2>/dev/null || true
 	$(MAKE) _build ARCH=$(or $(ARCH),native) CXX=$(CXX) \
-		CXXFLAGS="$(CXXFLAGS) -fprofile-generate=$(PGO_DIR)" \
+		PGO_GEN=1 \
 		LDFLAGS="$(LDFLAGS_LINUX) -fprofile-generate=$(PGO_DIR)" \
 		SUFFIX=pgo-gen EXT= STRIP_BIN=true
-	./$(BIN_DIR)/$(EXE)-pgo-gen bench
-	./$(BIN_DIR)/$(EXE)-pgo-gen perft 6
-	./$(BIN_DIR)/$(EXE)-pgo-gen go movetime 1000
-	./$(BIN_DIR)/$(EXE)-pgo-gen go movetime 5000
-	./$(BIN_DIR)/$(EXE)-pgo-gen go movetime 10000
-	./$(BIN_DIR)/$(EXE)-pgo-gen go depth 12
-	./$(BIN_DIR)/$(EXE)-pgo-gen go depth 16
+	$(CURDIR)/$(BIN_DIR)/$(EXE)-pgo-gen$(EXT) bench
+	$(CURDIR)/$(BIN_DIR)/$(EXE)-pgo-gen$(EXT) perft 6
+	$(CURDIR)/$(BIN_DIR)/$(EXE)-pgo-gen$(EXT) go movetime 1000
+	$(CURDIR)/$(BIN_DIR)/$(EXE)-pgo-gen$(EXT) go movetime 5000
+	$(CURDIR)/$(BIN_DIR)/$(EXE)-pgo-gen$(EXT) go movetime 10000
+	$(CURDIR)/$(BIN_DIR)/$(EXE)-pgo-gen$(EXT) go depth 12
+	$(CURDIR)/$(BIN_DIR)/$(EXE)-pgo-gen$(EXT) go depth 16
 	$(MAKE) _build ARCH=$(or $(ARCH),native) CXX=$(CXX) \
-		CXXFLAGS="$(CXXFLAGS) -fprofile-use=$(PGO_DIR) -Wno-missing-profile" \
+		PGO_USE=1 \
 		LDFLAGS="$(LDFLAGS_LINUX) -fprofile-use=$(PGO_DIR)" \
 		SUFFIX=pgo EXT= STRIP_BIN=$(STRIP)
 	@$(RMDIR) $(PGO_DIR)
-	@$(RM) $(BIN_DIR)/$(EXE)-pgo-gen
+	@$(RM) $(BIN_DIR)/$(EXE)-pgo-gen$(EXT)
 
 PREFIX ?= /usr/local
 
