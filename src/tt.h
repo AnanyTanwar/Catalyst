@@ -44,7 +44,7 @@ enum TTFlag : uint8_t {
     TT_EXACT = 3,
 };
 
-// 10 bytes per entry — identical footprint to Stockfish / Stormphrax / Berserk.
+// 10 bytes per entry 
 // Field order matches probe() access order for sequential memory reads.
 //
 //   key16     : low 16 bits of the Zobrist key — used to verify a cluster hit
