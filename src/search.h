@@ -182,12 +182,19 @@ public:
     }
     uint64_t nodes() const { return info_.nodes; }
     int      last_score() const { return info_.lastScore; }
+    int      depth() const { return info_.depth; }
+    Move     best_move_found() const { return info_.bestMove; }
     void     clear_tables();
 
     Move ponder_move() const
     {
         return (pvTable_[0].length >= 2) ? pvTable_[0].moves[1] : MOVE_NONE;
     }
+
+    // Root PV as found by this thread's most recent search — used by
+    // ThreadPool::best_thread() to adopt the winning thread's line for
+    // "info pv" / ponder-move purposes.
+    const PvList &root_pv() const { return pvTable_[0]; }
 
     [[nodiscard]] bool see_ge(const Board &board, Move m, int threshold) const
     {

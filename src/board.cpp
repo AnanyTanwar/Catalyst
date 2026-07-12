@@ -226,7 +226,11 @@ void Board::copy_from(const Board &other)
     sideToMove = other.sideToMove;
     gamePly    = other.gamePly;
 
-    startState   = other.startState;
+    // Copy the CURRENT state (*other.st), not other.startState — other.st
+    // may point deep into a chain of make_move()'d StateInfo objects if
+    // the source board has moves played on it (e.g. mid-game), and
+    // other.startState is stale/irrelevant in that case.
+    startState   = *other.st;
     st           = &startState;
     st->previous = nullptr;
 

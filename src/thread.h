@@ -38,8 +38,12 @@ public:
     void     stop();
     void     clear_all();
     uint64_t total_nodes() const;
-    Move     ponder_move() const { return main_->ponder_move(); }
-    int      thread_count() const { return int(helpers_.size()) + 1; }
+
+    // Ponder move is read from whichever thread's line was actually
+    // returned as bestmove by the most recent search() call — NOT always
+    // main_, since best_thread() may have picked a helper.
+    Move ponder_move() const { return lastWinner_ ? lastWinner_->ponder_move() : MOVE_NONE; }
+    int  thread_count() const { return int(helpers_.size()) + 1; }
 
 private:
     std::unique_ptr<Search> main_;
@@ -49,6 +53,14 @@ private:
         std::unique_ptr<Board>  board;
     };
     std::vector<Helper> helpers_;
+
+    // Tracks whichever Search instance won the most recent search() call,
+    // so ponder_move() can pull from the correct thread's PV.
+    Search *lastWinner_ = nullptr;
+
+    // Picks the strongest result across main_ + all helpers after a search
+    // completes. Returns a pointer to the winning Search instance.
+    Search *best_thread();
 };
 
 }  // namespace Catalyst
