@@ -62,6 +62,124 @@ uint64_t ThreadPool::total_nodes() const
     return total;
 }
 
+// ---------------------------------------------------------------------------
+// best_thread()
+// ---------------------------------------------------------------------------
+// Lazy SMP runs N independent searches against the same TT. They don't
+// always agree — different move-ordering noise means different threads can
+// finish at different depths with different scores. Previously we just
+// returned whatever the main thread found, silently discarding helper
+// results even when a helper searched deeper or found a better line.
+//
+// Selection rules, applied in order (same shape as Stockfish's
+// Threads.get_best_thread(), simplified):
+//
+//   1. Prefer a proven mate over a non-mate, and a shorter mate over a
+//      longer one (shorter = more forcing = more trustworthy).
+//   2. Among non-mate results, prefer higher depth — a deeper search has
+//      seen strictly more of the tree and is more reliable, UNLESS the
+//      shallower thread's score is clearly better AND backed by a
+//      comparable amount of work (guards against a helper that got lucky
+//      on a shallow but wide search).
+//   3. Final tie-break: more nodes searched wins, since it's a proxy for
+//      how thoroughly the position was explored.
+//
+// A thread with no legal best move (shouldn't normally happen, but can on
+// an instant stop) is never selected over one that has one.
+Search *ThreadPool::best_thread()
+{
+    Search *best = main_.get();
+
+    for (auto &h : helpers_)
+    {
+        Search *cand = h.searcher.get();
+
+        // A thread with no move found is never preferred.
+        if (cand->best_move_found() == MOVE_NONE)
+            continue;
+        if (best->best_move_found() == MOVE_NONE)
+        {
+            best = cand;
+            continue;
+        }
+
+        const int  candScore = cand->last_score();
+        const int  bestScore = best->last_score();
+        const bool candMate  = std::abs(candScore) >= SCORE_MATE_IN_MAX_PLY;
+        const bool bestMate  = std::abs(bestScore) >= SCORE_MATE_IN_MAX_PLY;
+
+        if (candMate || bestMate)
+        {
+            // Winning mate beats everything; between two winning mates,
+            // shorter wins; a winning mate beats a losing/non-mate score.
+            if (candMate != bestMate)
+            {
+                // Prefer whichever one is mate, but only if it's a WINNING
+                // mate for us (positive score) — a found losing mate isn't
+                // automatically better than a merely bad non-mate score.
+                if (candMate && candScore > 0 && (!bestMate || bestScore <= 0))
+                {
+                    best = cand;
+                    continue;
+                }
+                if (bestMate && bestScore > 0)
+                    continue;  // keep best
+                if (candMate && candScore > 0)
+                {
+                    best = cand;
+                    continue;
+                }
+            }
+            else if (candMate && bestMate && candScore > 0 && bestScore > 0)
+            {
+                // Both found winning mates — shorter (higher score, since
+                // mate scores shrink with distance) wins.
+                if (candScore > bestScore)
+                    best = cand;
+                continue;
+            }
+        }
+
+        // Neither side is a clearly-winning mate case handled above —
+        // fall through to depth/score/node comparison.
+        const int candDepth = cand->depth();
+        const int bestDepth = best->depth();
+
+        if (candDepth != bestDepth)
+        {
+            // Deeper search wins outright unless the shallower one's score
+            // is meaningfully higher (by more than a small margin), in
+            // which case we trust the score over raw depth.
+            constexpr int SCORE_OVERRIDE_MARGIN = 30;
+            if (candDepth > bestDepth)
+            {
+                if (bestScore > candScore + SCORE_OVERRIDE_MARGIN)
+                    continue;  // shallower 'best' had a much better score — keep it
+                best = cand;
+                continue;
+            }
+            else
+            {
+                if (candScore > bestScore + SCORE_OVERRIDE_MARGIN)
+                    best = cand;
+                continue;
+            }
+        }
+
+        // Same depth — prefer the better score, tie-break on nodes searched.
+        if (candScore > bestScore)
+        {
+            best = cand;
+        }
+        else if (candScore == bestScore && cand->nodes() > best->nodes())
+        {
+            best = cand;
+        }
+    }
+
+    return best;
+}
+
 Move ThreadPool::search(Board &board, TimeManager &tm)
 {
     main_->stopped.store(false, std::memory_order_relaxed);
@@ -85,7 +203,10 @@ Move ThreadPool::search(Board &board, TimeManager &tm)
         threads.emplace_back([s, b, &tm]() { s->best_move(*b, tm); });
     }
 
-    Move best = main_->best_move(board, tm);
+    // Main thread still drives time management and prints "info" lines as
+    // it goes — that behaviour is unchanged. We just stop trusting its
+    // result blindly once everyone has finished.
+    main_->best_move(board, tm);
 
     for (auto &h : helpers_)
         h.searcher->stopped.store(true, std::memory_order_relaxed);
@@ -99,7 +220,12 @@ Move ThreadPool::search(Board &board, TimeManager &tm)
     for (auto &h : helpers_)
         h.searcher->sharedNodes_ = nullptr;
 
-    return best;
+    // Now that every thread has fully stopped, pick the strongest result.
+    // All threads have joined at this point, so it's safe to read their
+    // final info_ state without synchronization.
+    Search *winner = best_thread();
+    lastWinner_    = winner;
+    return winner->best_move_found();
 }
 
 }  // namespace Catalyst

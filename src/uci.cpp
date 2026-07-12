@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <charconv>
 #include <cstdint>
 #include <iostream>
 #include <sstream>
@@ -338,6 +339,25 @@ void UCI::cmd_stop()
     join_search();
 }
 
+// Safely parses an integer option value. Returns false (and leaves out
+// untouched) if value is empty or not a valid integer, instead of relying
+// on std::stoi's throw-on-failure behavior (exceptions are disabled build-wide).
+static bool try_parse_int(const std::string &value, int &out)
+{
+    if (value.empty())
+        return false;
+
+    // Skip leading whitespace, since setoption values can have it depending
+    // on how the token was built above.
+    const char *begin = value.c_str();
+    const char *end   = begin + value.size();
+    while (begin < end && *begin == ' ')
+        ++begin;
+
+    auto [ptr, ec] = std::from_chars(begin, end, out);
+    return ec == std::errc() && ptr == end;
+}
+
 void UCI::cmd_setoption(std::istringstream &iss)
 {
     std::string token, name, value;
@@ -350,11 +370,15 @@ void UCI::cmd_setoption(std::istringstream &iss)
 
     if (name == "Hash")
     {
-        int mb = std::clamp(std::stoi(value), 1, 65536);
-        if (mb != options.hashSizeMB)
+        int parsed;
+        if (try_parse_int(value, parsed))
         {
-            options.hashSizeMB = mb;
-            tt.resize(size_t(mb));
+            int mb = std::clamp(parsed, 1, 65536);
+            if (mb != options.hashSizeMB)
+            {
+                options.hashSizeMB = mb;
+                tt.resize(size_t(mb));
+            }
         }
     }
     else if (name == "Clear Hash")
@@ -364,7 +388,9 @@ void UCI::cmd_setoption(std::istringstream &iss)
     }
     else if (name == "Move Overhead")
     {
-        options.moveOverhead = std::max(0, std::stoi(value));
+        int parsed;
+        if (try_parse_int(value, parsed))
+            options.moveOverhead = std::max(0, parsed);
     }
     else if (name == "Ponder")
     {
@@ -372,12 +398,16 @@ void UCI::cmd_setoption(std::istringstream &iss)
     }
     else if (name == "Threads")
     {
-        int hw = std::max(1, int(std::thread::hardware_concurrency()));
-        int n  = std::clamp(std::stoi(value), 1, hw);
-        if (n != options.threads)
+        int parsed;
+        if (try_parse_int(value, parsed))
         {
-            options.threads = n;
-            pool_->set_threads(n);
+            int hw = std::max(1, int(std::thread::hardware_concurrency()));
+            int n  = std::clamp(parsed, 1, hw);
+            if (n != options.threads)
+            {
+                options.threads = n;
+                pool_->set_threads(n);
+            }
         }
     }
     else if (name == "EvalFile")
