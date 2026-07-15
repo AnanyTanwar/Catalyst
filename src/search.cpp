@@ -1,5 +1,5 @@
 // Catalyst is a UCI compliant chess engine
-//  Copyright (C) 2026 Anany Tanwar
+// Copyright (C) 2026 Anany Tanwar
 
 // Catalyst is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
