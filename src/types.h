@@ -34,6 +34,11 @@ inline constexpr std::string_view ENGINE_VERSION = "v3.1.0";
 inline constexpr std::string_view ENGINE_AUTHOR  = "Anany Tanwar";
 
 // Type Aliases
+//   Key      - Zobrist hash of a position, used for the TT and repetition detection
+//   TbResult - packed tablebase probe result (currently unused/reserved)
+//   Score    - centipawn evaluation score (see mate/TB constants below)
+//   Move     - packed move representation, see encoding comment near from_sq()/to_sq()
+//   Depth    - remaining search depth in plies; int8_t is enough since MAX_DEPTH is small
 using Bitboard = uint64_t;
 using Key      = uint64_t;
 using TbResult = uint32_t;
@@ -47,7 +52,13 @@ inline constexpr int MAX_MOVES = 512;
 inline constexpr int MAX_DEPTH = 64;
 
 // Score hierarchy (high to low): INFINITE > NONE > MATE > TB_WIN > MATE_IN_MAX_PLY > normal scores
-// Scores beyond SCORE_MATE_IN_MAX_PLY are treated as forced mate or TB win/loss
+// Scores beyond SCORE_MATE_IN_MAX_PLY are treated as forced mate or TB win/loss.
+//
+// The MATE_IN_MAX_PLY / TB_WIN_IN_MAX_PLY thresholds exist so the engine can
+// tell "a real mate/TB score" apart from "a large-but-normal eval" just by
+// comparing magnitudes - see is_mate_score() below. Subtracting the current
+// ply from SCORE_MATE (mate_in()/mated_in()) also lets the search prefer
+// faster mates over slower ones, since a mate found sooner has a higher score.
 inline constexpr Score SCORE_DRAW            = 0;
 inline constexpr Score SCORE_MATE            = 32000;
 inline constexpr Score SCORE_INFINITE        = 32001;
@@ -181,8 +192,11 @@ struct CastlingData {
 };
 
 // clang-format off
-// Indexed by CastlingRights bitmask — only power-of-two indices (1,2,4,8) are valid castling rights
-// Composite rights (e.g. WHITE_CASTLING=3) are never used as direct lookup keys here
+// Precomputed king/rook source and destination squares for each castling
+// right, indexed directly by the CastlingRights bitmask value (1, 2, 4, 8).
+// Composite/impossible indices (0, 3, 5, 6, 7, 9-15) are unused filler -
+// they're never looked up because callers always index by a single right,
+// not a combination of rights.
 inline constexpr CastlingData CASTLING_DATA[CASTLING_RIGHTS_NB] = {
     {SQ_NONE, SQ_NONE, SQ_NONE, SQ_NONE}, // 0: NO_CASTLING
     {SQ_E1, SQ_G1, SQ_H1, SQ_F1},         // 1: WHITE_OO
@@ -402,7 +416,14 @@ inline std::ostream &operator<<(std::ostream &os, Color c)
     return os;
 }
 
-// Move encoding: [from: 6][to: 6][type: 2][promo: 2]
+// Move encoding: a Move is a packed 16-bit value laid out as
+//   bits 0-5   : from-square  (0-63)
+//   bits 6-11  : to-square    (0-63)
+//   bits 12-13 : MoveType     (normal/castling/en-passant/promotion)
+//   bits 14-15 : promotion piece index into PROMO_PIECES (only meaningful
+//                when move_type == MT_PROMOTION)
+// This keeps a Move at 2 bytes, which matters for cache density in move
+// lists, the TT, and history/killer tables.
 inline constexpr PieceType PROMO_PIECES[4] = { KNIGHT, BISHOP, ROOK, QUEEN };
 
 [[nodiscard]] FORCE_INLINE constexpr Square from_sq(Move m)
@@ -469,6 +490,11 @@ inline constexpr PieceType PROMO_PIECES[4] = { KNIGHT, BISHOP, ROOK, QUEEN };
     return uci;
 }
 
+// Portable cache-line prefetch hint. Used before TT/NNUE accumulator
+// lookups to reduce memory-latency stalls - hints the CPU to start pulling
+// the cache line in before the value is actually needed a few instructions
+// later. A no-op on unrecognized compilers, since prefetching is purely a
+// performance hint and safe to skip.
 #if defined(__GNUC__) || defined(__clang__)
 #define PREFETCH(addr) __builtin_prefetch(addr, 0, 3)
 #elif defined(_MSC_VER)
