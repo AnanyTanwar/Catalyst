@@ -21,13 +21,17 @@
 
 namespace Catalyst {
 
+// Generates pseudo-legal moves into `list`, returns one-past-end.
 template <GenType GT> Move *generate(const Board &board, Move *list);
 
 extern template Move *generate<ALL_MOVES>(const Board &, Move *);
 extern template Move *generate<CAPTURES>(const Board &, Move *);
 extern template Move *generate<QUIETS>(const Board &, Move *);
 
+// Filters generate<ALL_MOVES>() through Board::is_legal() - convenience wrapper.
 MoveList generate_legal(Board &board);
-int      count_legal(Board &board);
+
+// Counts legal moves without allocating a MoveList - cheap stalemate/checkmate checks.
+int count_legal(Board &board);
 
 }  // namespace Catalyst
