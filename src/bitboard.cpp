@@ -21,6 +21,7 @@
 
 namespace Catalyst {
 
+// Storage definitions for the tables declared `extern` in bitboard.h.
 alignas(64) Bitboard PawnAttacks[COLOR_NB][SQUARE_NB];
 alignas(64) Bitboard PawnPushes[COLOR_NB][SQUARE_NB];
 alignas(64) Bitboard PawnDoublePushes[COLOR_NB][SQUARE_NB];
@@ -35,6 +36,11 @@ alignas(64) MagicPext BishopMagicsPext[SQUARE_NB];
 alignas(64) MagicMultiply RookMagicsMul[SQUARE_NB];
 alignas(64) MagicMultiply BishopMagicsMul[SQUARE_NB];
 
+// Sanity-check the table sizes against the known perfect-hash table sizes
+// for magic bitboards (0x19000 entries for rooks, 0x1480 for bishops) -
+// these numbers come from the sum of 2^popcount(mask) across all 64
+// squares for each piece type, and are only correct if the masks used
+// here match the ones the table sizes were derived from.
 static_assert(sizeof(RookTable) == 0x19000 * sizeof(Bitboard), "RookTable size mismatch");
 static_assert(sizeof(BishopTable) == 0x1480 * sizeof(Bitboard), "BishopTable size mismatch");
 
@@ -44,6 +50,11 @@ alignas(64) Bitboard BishopTable[0x1480];
 Bitboard (*g_rook_attacks)(Square sq, Bitboard occ)   = nullptr;
 Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ) = nullptr;
 
+// Concrete attack-lookup functions for each backend/piece-type combo.
+// One of these gets assigned to g_rook_attacks/g_bishop_attacks at startup
+// based on cpu_has_bmi2() (see init_magics() below) - the rest of the
+// engine calls rook_attacks()/bishop_attacks() from bitboard.h without
+// ever knowing which backend is actually active.
 static Bitboard rook_attacks_pext(Square sq, Bitboard occ)
 {
     return RookMagicsPext[sq].attacks[RookMagicsPext[sq].index(occ)];
@@ -64,6 +75,13 @@ static Bitboard bishop_attacks_mul(Square sq, Bitboard occ)
     return BishopMagicsMul[sq].attacks[BishopMagicsMul[sq].index(occ)];
 }
 
+// Computes the true attack set for a sliding piece by walking each ray
+// direction until hitting the board edge or an occupied square (inclusive
+// of that blocking square, since the slider can capture onto it). This is
+// the "slow but correct" ground-truth generator - used only at startup to
+// fill the magic tables, never called during search. The `walk` lambda
+// takes a direction and a boundary predicate so the same loop body works
+// for both rook (4 orthogonal rays) and bishop (4 diagonal rays).
 template <PieceType Pt> static FORCE_INLINE Bitboard sliding_attack(Square sq, Bitboard occupied)
 {
     static_assert(Pt == ROOK || Pt == BISHOP, "Only ROOK or BISHOP");
@@ -98,6 +116,14 @@ template <PieceType Pt> static FORCE_INLINE Bitboard sliding_attack(Square sq, B
     return attacks;
 }
 
+// Computes the *relevant occupancy mask* for a sliding piece - the same
+// ray-walking as sliding_attack(), but stopping one square short of the
+// edge (RANK_7/RANK_2/FILE_G/FILE_B instead of RANK_8/RANK_1/FILE_H/FILE_A).
+// This matters because a piece/blocker sitting on the actual edge square
+// never changes the attack set (the ray was going to stop there anyway),
+// so excluding edge squares from the mask shrinks the number of relevant
+// occupancy bits - and therefore the table size - without losing any
+// information needed to compute the correct attack set.
 template <PieceType Pt> static FORCE_INLINE Bitboard sliding_mask(Square sq)
 {
     static_assert(Pt == ROOK || Pt == BISHOP, "Only ROOK or BISHOP");
@@ -130,6 +156,12 @@ template <PieceType Pt> static FORCE_INLINE Bitboard sliding_mask(Square sq)
     return mask;
 }
 
+// Precomputed "magic" multipliers for the portable (non-BMI2) hashing
+// backend - one per square, hand-picked (via offline search) so that
+// `(occupancy & mask) * magic` maps every relevant occupancy pattern for
+// that square to a unique index with no collisions. Only used by
+// init_magic_table_impl() when building the MagicMultiply tables; ignored
+// entirely on the PEXT path since PEXT needs no magic constant.
 // clang-format off
 static constexpr Bitboard RookMagicNumbers[SQUARE_NB] = {
     0x8a80104000800020ULL,
@@ -199,6 +231,7 @@ static constexpr Bitboard RookMagicNumbers[SQUARE_NB] = {
 };
 // clang-format on
 
+// Same role as RookMagicNumbers above, for bishops.
 // clang-format off
 static constexpr Bitboard BishopMagicNumbers[SQUARE_NB] = {
     0x40040844404084ULL,
@@ -268,6 +301,15 @@ static constexpr Bitboard BishopMagicNumbers[SQUARE_NB] = {
 };
 // clang-format on
 
+// Builds the magic table for one piece type (Pt) and one backend (MagicT
+// = MagicPext or MagicMultiply). For each square: compute its mask, then
+// enumerate all 2^popcount(mask) possible occupancy subsets of that mask
+// (the `for (int i = 0; i < n; ++i)` loop walks every subset by treating i
+// as a bitmask over the mask's set bits), compute the true attack set for
+// each subset via sliding_attack(), and store it at m.index(occupancy) in
+// the flat `table` array. `ptr` walks forward through the shared table so
+// each square gets its own non-overlapping slice sized to exactly the
+// number of occupancy variations it needs.
 template <PieceType Pt, typename MagicT>
 static void init_magic_table_impl(MagicT *magics, Bitboard *table, const Bitboard *magicNumbers)
 {
@@ -308,6 +350,9 @@ static void init_magic_table_impl(MagicT *magics, Bitboard *table, const Bitboar
     }
 }
 
+// Entry point for magic table setup - detects BMI2 support once and builds
+// either the PEXT or multiply-shift tables accordingly, then wires up
+// g_rook_attacks/g_bishop_attacks to the matching lookup functions.
 static void init_magics()
 {
     bool bmi2 = cpu_has_bmi2();
@@ -331,6 +376,13 @@ static void init_magics()
     assert(g_bishop_attacks != nullptr);
 }
 
+// Builds every non-sliding lookup table: pawn attacks/pushes, knight/king
+// attacks, PseudoAttacks (the attack set for each piece type on an
+// otherwise-empty board - used for cheap "could this piece type reach that
+// square" checks without needing real occupancy), and BetweenBB/LineBB for
+// pin and check-evasion logic. The second loop below (BetweenBB/LineBB)
+// depends on PseudoAttacks[ROOK]/[BISHOP] already being filled by the
+// first loop in this same function.
 static void init_attacks()
 {
     std::memset(PawnAttacks, 0, sizeof(PawnAttacks));
