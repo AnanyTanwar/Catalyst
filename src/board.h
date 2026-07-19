@@ -22,6 +22,10 @@
 
 namespace Catalyst {
 
+// Random keys used to build the position's Zobrist hash incrementally:
+// each piece-on-square, en passant file, castling right, and side-to-move
+// gets XORed in/out of the hash as moves are made/unmade, rather than
+// recomputing the whole hash from the board every time.
 namespace Zobrist {
     // Zobrist hashing: pseudo-random keys XORed together for incremental position hash updates.
     // Init must be called before any Board operations
@@ -33,6 +37,11 @@ namespace Zobrist {
     void init();
 }  // namespace Zobrist
 
+// Per-move state snapshot, forming a linked stack via `previous` so
+// unmake_move() can restore the exact prior state without recomputation.
+// alignas(64) + the static_assert below keep this at exactly one cache
+// line, since a new StateInfo gets touched on every single make_move call
+// during search - a hot enough path that layout matters.
 struct alignas(64) StateInfo {
     // Full 64-byte Zobrist hash of the position (incrementally updated on make_move)
     Key key;
@@ -64,6 +73,13 @@ struct alignas(64) StateInfo {
 };
 static_assert(sizeof(StateInfo) == 128, "StateInfo size mismatch — check padding");
 
+// Per-square AND-mask applied to castling rights whenever a piece moves to
+// or from that square - e.g. moving the a1 rook or the e1 king clears
+// WHITE_OOO/WHITE_CASTLING respectively. Values are the bitwise complement
+// of the rights that square's occupant losing/gaining a piece should
+// revoke; squares with no castling relevance are 15 (no bits cleared).
+// Applied as `castlingRights &= CASTLING_RIGHTS_MASK[sq]` for both the
+// from-square and to-square on every move.
 // clang-format off
 inline constexpr int CASTLING_RIGHTS_MASK[SQUARE_NB] = {
   13, 15, 15, 15, 12, 15, 15, 14, // Rank 1: a1=~WHITE_OOO, e1=~WHITE_CASTLING, h1=~WHITE_OO
@@ -77,26 +93,44 @@ inline constexpr int CASTLING_RIGHTS_MASK[SQUARE_NB] = {
 };
 // clang-format on
 
+// The main position object. Piece data is stored in three redundant forms
+// for fast access from different angles: `board[]` for O(1) piece-on-
+// square lookup, `byTypeBB[]`/`byColorBB[]` bitboards for O(1) "all pieces
+// of this type/color" queries used throughout move generation and eval.
+// Movable/copyable semantics are restricted (see deleted copy ctor below)
+// since Board owns a StateInfo stack via raw pointers - copying it
+// naively would leave dangling `previous` pointers.
 class alignas(64) Board {
 public:
     Board();
     ~Board() = default;
 
+    // Copy is deleted (see class comment above); move is fine since it just
+    // transfers ownership of the same StateInfo stack.
     Board(const Board &)            = delete;
     Board &operator=(const Board &) = delete;
     Board(Board &&)                 = default;
     Board &operator=(Board &&)      = default;
 
+    // FEN (de)serialization - the standard textual format for a chess
+    // position, used by UCI's `position fen ...` command and for debugging.
     void        set_fen(const std::string &fen);
     std::string get_fen() const;
     void        set_startpos();
 
+    // Core move application. `newSt` must outlive the corresponding
+    // unmake_move() call - callers (search) hold it on their own stack frame
+    // so each ply gets its own StateInfo without heap allocation. Null moves
+    // (make_null_move/unmake_null_move) apply a "pass" used by null-move
+    // pruning in search - flips side to move and clears the ep square without
+    // moving any piece.
     void make_move(Move m, StateInfo &newSt);
     void unmake_move(Move m);
     void make_null_move(StateInfo &newSt);
     void unmake_null_move();
     void copy_from(const Board &other);
 
+    // Cheap O(1) accessors, inlined for use in hot search/eval loops.
     // clang-format off
   [[nodiscard]] FORCE_INLINE Piece    piece_on(Square sq) const               { return board[sq]; }
   [[nodiscard]] FORCE_INLINE bool     empty(Square sq) const                  { return board[sq] == NO_PIECE; }
@@ -119,10 +153,19 @@ public:
 
   [[nodiscard]] FORCE_INLINE Bitboard checkers() const  { return st->checkersBB; }
   [[nodiscard]] FORCE_INLINE bool     in_check() const  { return st->checkersBB != 0; }
+
+  // True if the side to move's own king is currently attacked - used as a
+  // legality check for moves that don't get filtered out earlier (e.g. when
+  // generating pseudo-legal moves and validating them one at a time rather
+  // than filtering illegal moves during generation itself).
   [[nodiscard]] FORCE_INLINE bool move_leaves_king_in_check() const {
     return (attackers_to(king_square(sideToMove)) & pieces(~sideToMove)) != 0;
   }
 
+  // Move classification used by move ordering (see movepick.cpp) and
+  // quiescence search's stand-pat gating. En passant is a special case since
+  // the captured pawn isn't on the move's destination square, so the normal
+  // "is there a piece on the target square" check doesn't catch it.
   [[nodiscard]] FORCE_INLINE bool is_capture(Move m) const {
     return move_type(m) == MT_EN_PASSANT ||
            (move_type(m) != MT_CASTLING && piece_on(to_sq(m)) != NO_PIECE);
@@ -130,25 +173,67 @@ public:
   [[nodiscard]] FORCE_INLINE bool is_capture_or_promotion(Move m) const { return is_capture(m) || is_promotion(m); }
     // clang-format on
 
-    //  Attack and legality queries
-    [[nodiscard]] Square   castling_rook_square(CastlingRights cr) const;
+    // Attack and legality queries - the core primitives used by move
+    // generation, check detection, and SEE (static exchange evaluation).
+    [[nodiscard]] Square castling_rook_square(CastlingRights cr) const;
+    // Computes pinned pieces and discovered-check blockers for a given color.
+    // A "blocker" is a piece standing between its own king and an enemy
+    // slider's attack - moving it would either expose the king to check (if
+    // it's the same color as the king) or reveal a discovered check on the
+    // opponent (if it's the opposing color).
     [[nodiscard]] Bitboard blockers_for_king(Color c) const;
     [[nodiscard]] Bitboard check_blockers(Color c, Color kingColor) const;
+    // Returns every piece (of any color) attacking the given square. The
+    // overload taking an explicit `occupied` bitboard lets callers probe
+    // hypothetical occupancy (e.g. "who would attack this square if that
+    // piece moved away") without mutating the board - used heavily by SEE.
     [[nodiscard]] Bitboard attackers_to(Square sq) const;
     [[nodiscard]] Bitboard attackers_to(Square sq, Bitboard occupied) const;
-    [[nodiscard]] Square   king_square(Color c) const;
-    [[nodiscard]] bool     gives_check(Move m) const;
-    [[nodiscard]] bool     is_legal(Move m) const;
-    [[nodiscard]] bool     is_pseudo_legal(Move m) const;
-    [[nodiscard]] bool     is_draw(int ply) const;
-    [[nodiscard]] bool     has_game_cycle(int ply) const;
+    // O(1) king location lookup - kept as a dedicated accessor (rather than
+    // requiring callers to pop_lsb(pieces(KING, c)) every time) since it's
+    // called extremely often across search, eval, and legality checking.
+    [[nodiscard]] Square king_square(Color c) const;
+    // True if playing move m would put the opponent's king in check. Used by
+    // search to extend or otherwise treat checking moves specially, and by
+    // quiescence search to decide whether a quiet move is still worth
+    // searching despite not being a capture.
+    [[nodiscard]] bool gives_check(Move m) const;
+    // Full legality check for a pseudo-legal move: confirms it doesn't leave
+    // the mover's own king in check (accounting for pins, en passant
+    // discovered checks, and castling-through-check rules).
+    [[nodiscard]] bool is_legal(Move m) const;
+    // Checks whether a move is structurally valid on the current board
+    // (correct piece on the from-square, legal-shaped move for that piece
+    // type, target not blocked, etc.) WITHOUT checking king safety - used to
+    // validate TT move hints, which may be stale from a different position
+    // that happens to hash the same.
+    [[nodiscard]] bool is_pseudo_legal(Move m) const;
+    // True if the position is drawn by the 50-move rule or repetition, from
+    // the perspective of ply `ply` into the current search (needed since
+    // repetition detection must respect the search's own move stack, not just
+    // positions reached before the search started).
+    [[nodiscard]] bool is_draw(int ply) const;
+    // Detects an upcoming repetition cycle reachable from the current
+    // position - used by search to recognize and avoid/permit draws by
+    // repetition before they're fully reached, rather than only detecting them
+    // after the fact via is_draw().
+    [[nodiscard]] bool has_game_cycle(int ply) const;
 
+    // Debug helper: prints a human-readable ASCII board plus key state
+    // (side to move, castling rights, ep square, etc.) to stdout.
     void display() const;
 
+    // Flat history of Zobrist keys for the whole game (not just the current
+    // search), used by is_repetition()/is_draw() to detect repetition against
+    // positions reached before search began - separate from the StateInfo
+    // stack, which only covers the current search's in-flight moves.
     static constexpr int MAX_GAME_PLY = 512;
     Key                  positionHistory[MAX_GAME_PLY];
     int                  historyLen = 0;
 
+    // Called by the UCI/game-loop layer as real moves are played (not by
+    // search's make_move/unmake_move, which operate on the StateInfo stack
+    // instead) - keeps positionHistory in sync with the actual game so far.
     FORCE_INLINE void add_to_history(Key k)
     {
         if (historyLen < MAX_GAME_PLY)
@@ -160,9 +245,15 @@ public:
             --historyLen;
     }
 
+    // Checks positionHistory (and optionally the search's in-flight StateInfo
+    // stack, depending on `ply`) for a repeated position.
     [[nodiscard]] bool is_repetition(int ply) const;
 
 private:
+    // Primary board state: byTypeBB/byColorBB give O(1) bitboard access per
+    // piece-type/color (and their combination via pieces(pt, c)); board[] gives
+    // O(1) piece lookup for a specific square. Both are kept in sync on every
+    // make_move/unmake_move.
     alignas(64) Bitboard byTypeBB[PIECE_TYPE_NB];
     alignas(64) Bitboard byColorBB[COLOR_NB];
     alignas(64) Piece board[SQUARE_NB];
@@ -172,10 +263,12 @@ private:
     StateInfo *st;
     int        gamePly;
 
+    // Cached copies of castling path/rook-square data for fast lookup during
+    // move generation and making/unmaking castling moves.
     Bitboard castlingPath[CASTLING_RIGHTS_NB];
     Square   castlingRookSquare[CASTLING_RIGHTS_NB];
 
-    // Internal helpers
+    // Internal helpers - board mutation primitives used by make_move/unmake_move.
     void clear();
     void put_piece(Piece pc, Square sq);
     void remove_piece(Square sq);
@@ -186,6 +279,12 @@ private:
     Key  compute_pawn_key() const;
     Key  compute_non_pawn_key(Color c) const;
 
+    // Recomputes the full Zobrist hash from scratch by scanning the entire
+    // board - used only for correctness verification (e.g. debug asserts
+    // comparing against the incrementally-maintained key) or when
+    // incremental update isn't straightforward, never on the hot path.
+    // AfterMove selects whether to include post-move state (like the new side
+    // to move) or pre-move state, depending on when it's called.
     template <bool AfterMove> Key compute_key() const;
 };
 
