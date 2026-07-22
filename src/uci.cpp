@@ -35,10 +35,6 @@
 #include <string>
 #include <thread>
 
-#ifdef TUNING
-#include "tuning.h"
-#endif
-
 namespace Catalyst {
 
 [[nodiscard]] static uint64_t perft(Board &board, int depth)
@@ -133,14 +129,6 @@ void UCI::loop()
             join_search();
             cmd_eval();
         }
-#ifdef TUNING
-        else if (token == "tune")
-        {
-            std::string path;
-            iss >> path;
-            run_texel_tuner(path);
-        }
-#endif
         else if (token == "datagen")
         {
             join_search();
