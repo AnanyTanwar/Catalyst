@@ -24,21 +24,6 @@
 
 namespace Catalyst {
 
-// -----------------------------------------------------------------------------
-// Bitboard attack generation and lookup tables
-// -----------------------------------------------------------------------------
-// This module provides precomputed attack bitboards for all piece types and
-// magic bitboard tables for sliding piece (rook/bishop) attack generation.
-// Two backends are supported:
-//   - BMI2 (pext): uses x86 parallel bit extraction for O(1) index computation
-//   - Fallback (multiply+shift): portable magic bitboard hashing
-// The appropriate backend is selected at runtime in init_bitboards().
-
-// Magic bitboard entry for the PEXT backend. `mask` isolates the relevant
-// occupancy bits (the rook/bishop's blocker squares on its rays, excluding
-// edge squares), and index() uses hardware PEXT to compress that occupancy
-// into a dense index in one instruction - no multiply, no shift table
-// needed, since PEXT does the perfect hashing for us.
 struct alignas(64) MagicPext {
     Bitboard  mask;
     Bitboard *attacks;
@@ -50,11 +35,6 @@ struct alignas(64) MagicPext {
     }
 };
 
-// Magic bitboard entry for the portable (non-BMI2) backend. Classic magic
-// bitboard hashing: mask off the relevant occupancy bits, multiply by a
-// precomputed "magic" constant that scrambles them into the high bits,
-// then shift right so only `64 - shift` bits remain - giving a collision-
-// free index into `attacks` for this square's specific occupancy pattern.
 struct alignas(64) MagicMultiply {
     Bitboard  mask;
     Bitboard  magic;
@@ -67,15 +47,6 @@ struct alignas(64) MagicMultiply {
     }
 };
 
-// Precomputed attack/lookup tables, filled in by init_bitboards() at
-// startup. Declared here, defined in bitboard.cpp.
-//   PawnAttacks/PawnPushes/PawnDoublePushes - per-color, per-square pawn move sets
-//   KnightAttacks/KingAttacks               - per-square leaper attack sets
-//   BetweenBB[a][b]                          - squares strictly between a and b if aligned, else 0
-//   LineBB[a][b]                             - full line through a and b if aligned, else 0
-//   PseudoAttacks[pt][sq]                    - attack set for pt on an empty board
-//   RookTable/BishopTable                    - flat backing storage for all magic attack entries,
-//                                               sized to fit every square's occupancy variations
 alignas(64) extern Bitboard PawnAttacks[COLOR_NB][SQUARE_NB];
 alignas(64) extern Bitboard PawnPushes[COLOR_NB][SQUARE_NB];
 alignas(64) extern Bitboard PawnDoublePushes[COLOR_NB][SQUARE_NB];
@@ -93,9 +64,6 @@ alignas(64) extern MagicMultiply BishopMagicsMul[SQUARE_NB];
 alignas(64) extern Bitboard RookTable[0x19000];
 alignas(64) extern Bitboard BishopTable[0x1480];
 
-// Function pointers selected once at startup (see init_bitboards()) based
-// on cpu_has_bmi2() - avoids branching on BMI2 support on every single
-// attack lookup during search, which would be a real hot-path cost.
 extern Bitboard (*g_rook_attacks)(Square sq, Bitboard occ);
 extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
 
@@ -114,25 +82,16 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
     return std::abs(rankOf(a) - rankOf(b));
 }
 
-// Identifies which of the 15 a1-h8-direction diagonals a square lies on
-// (0-14). Used to index PEXT/magic masks and diagonal-related lookups.
 [[nodiscard]] FORCE_INLINE constexpr int diagonal_of(Square sq)
 {
     return 7 + rankOf(sq) - fileOf(sq);
 }
 
-// Identifies which of the 15 a8-h1-direction diagonals a square lies on
-// (0-14).
 [[nodiscard]] FORCE_INLINE constexpr int anti_diagonal_of(Square sq)
 {
     return rankOf(sq) + fileOf(sq);
 }
 
-// Computes pawn attack squares directly from bit-shifting rather than a
-// table lookup - used to build the PawnAttacks[][] table itself during
-// init, and anywhere a compile-time/constexpr result is needed. The
-// ~FileHBB / ~FileABB masks prevent attacks from wrapping around the board
-// edge (e.g. a pawn on the h-file can't "attack" onto the a-file).
 [[nodiscard]] FORCE_INLINE constexpr Bitboard pawn_attacks_bb(Color c, Square s)
 {
     Bitboard b = square_bb(s);
@@ -142,9 +101,6 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
         return ((b & ~FileHBB) >> 7) | ((b & ~FileABB) >> 9);
 }
 
-// Same idea as pawn_attacks_bb() - constexpr knight attack generation via
-// shifts, with file masks to prevent wraparound on each of the 8 possible
-// knight jumps.
 [[nodiscard]] FORCE_INLINE constexpr Bitboard knight_attacks_bb(Square s)
 {
     Bitboard b = square_bb(s);
@@ -153,8 +109,6 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
            | ((b & ~(FileGBB | FileHBB)) >> 6) | ((b & ~(FileABB | FileBBB)) >> 10);
 }
 
-// Constexpr king attack generation (all 8 adjacent squares), same
-// wraparound-prevention approach as above.
 [[nodiscard]] FORCE_INLINE constexpr Bitboard king_attacks_bb(Square s)
 {
     Bitboard b = square_bb(s);
@@ -205,10 +159,6 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
     return bishop_attacks(sq, occ) | rook_attacks(sq, occ);
 }
 
-// Generic attack lookup dispatched by piece type - convenient when the
-// piece type isn't known at compile time (e.g. generic move generation
-// loops). Prefer the piece-specific functions above when the type is
-// already known, to avoid the branch chain here.
 [[nodiscard]] FORCE_INLINE Bitboard attacks_bb(PieceType pt, Square sq, Bitboard occupied)
 {
     if (pt == KNIGHT)
@@ -224,9 +174,6 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
     return 0;
 }
 
-// Squares strictly between s1 and s2 if they're aligned on a rank, file,
-// or diagonal (exclusive of both endpoints); empty bitboard otherwise.
-// Used for check-evasion (blocking squares) and pin detection.
 [[nodiscard]] FORCE_INLINE Bitboard between_bb(Square s1, Square s2)
 {
     return BetweenBB[s1][s2];
@@ -237,18 +184,11 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
     return LineBB[s1][s2];
 }
 
-// True if s1, s2, and s3 all lie on a common rank/file/diagonal line, with
-// s3 distinct from the other two. Used for pin and discovered-check
-// detection.
 [[nodiscard]] FORCE_INLINE bool aligned(Square s1, Square s2, Square s3)
 {
     return s3 != s1 && s3 != s2 && (LineBB[s1][s2] & square_bb(s3));
 }
 
-// Square-typed wrappers around the raw lsb()/msb() intrinsics, plus
-// pop_lsb() which extracts the lowest set square AND clears it from the
-// bitboard in one call - the standard idiom for "iterate every piece in
-// this bitboard": `while (bb) { Square s = pop_lsb(bb); ... }`.
 [[nodiscard]] FORCE_INLINE Square lsb_sq(Bitboard b)
 {
     assert(b);
@@ -268,11 +208,6 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
     return s;
 }
 
-// Directional bitboard shifts with edge-wraparound masking baked in.
-// Prefer the shift<Direction>() template below when the direction is a
-// compile-time constant (it compiles to the same code with zero overhead);
-// these named versions are for when a specific direction is being called
-// directly and reads clearer than the template syntax.
 [[nodiscard]] FORCE_INLINE constexpr Bitboard shift_north(Bitboard b)
 {
     return b << 8;
@@ -306,10 +241,6 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
     return (b & ~FileABB) >> 9;
 }
 
-// Compile-time-dispatched version of the shift functions above - useful in
-// templated move generation code where the direction is a template
-// parameter, letting the compiler pick the right branch at compile time
-// with no runtime cost.
 template <Direction D> [[nodiscard]] FORCE_INLINE constexpr Bitboard shift(Bitboard b)
 {
     if constexpr (D == NORTH)
@@ -331,10 +262,6 @@ template <Direction D> [[nodiscard]] FORCE_INLINE constexpr Bitboard shift(Bitbo
     return 0;
 }
 
-// Runtime-dispatched version for when the direction isn't known until
-// runtime (e.g. computed from a variable). Has actual branch/switch
-// overhead unlike the two versions above - avoid in hot loops where the
-// direction is statically known.
 [[nodiscard]] FORCE_INLINE Bitboard shift_direction(Bitboard b, Direction d)
 {
     switch (d)
@@ -360,10 +287,6 @@ template <Direction D> [[nodiscard]] FORCE_INLINE constexpr Bitboard shift(Bitbo
     }
 }
 
-// Fills a bitboard northward/southward from each set bit to the edge of
-// the board, using a doubling trick (b |= b << 8; b |= b << 16; ...) to
-// do it in log2(8) = 3 steps instead of 8. Used for e.g. detecting passed
-// pawns and open files.
 [[nodiscard]] FORCE_INLINE Bitboard fill_north(Bitboard b)
 {
     b |= b << 8;
