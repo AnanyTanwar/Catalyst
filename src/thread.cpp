@@ -62,30 +62,6 @@ uint64_t ThreadPool::total_nodes() const
     return total;
 }
 
-// ---------------------------------------------------------------------------
-// best_thread()
-// ---------------------------------------------------------------------------
-// Lazy SMP runs N independent searches against the same TT. They don't
-// always agree — different move-ordering noise means different threads can
-// finish at different depths with different scores. Previously we just
-// returned whatever the main thread found, silently discarding helper
-// results even when a helper searched deeper or found a better line.
-//
-// Selection rules, applied in order (same shape as Stockfish's
-// Threads.get_best_thread(), simplified):
-//
-//   1. Prefer a proven mate over a non-mate, and a shorter mate over a
-//      longer one (shorter = more forcing = more trustworthy).
-//   2. Among non-mate results, prefer higher depth — a deeper search has
-//      seen strictly more of the tree and is more reliable, UNLESS the
-//      shallower thread's score is clearly better AND backed by a
-//      comparable amount of work (guards against a helper that got lucky
-//      on a shallow but wide search).
-//   3. Final tie-break: more nodes searched wins, since it's a proxy for
-//      how thoroughly the position was explored.
-//
-// A thread with no legal best move (shouldn't normally happen, but can on
-// an instant stop) is never selected over one that has one.
 Search *ThreadPool::best_thread()
 {
     Search *best = main_.get();
