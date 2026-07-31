@@ -24,6 +24,7 @@
 
 namespace Catalyst {
 
+// Magic bitboard entry for PEXT backend - uses hardware parallel bit extraction
 struct alignas(64) MagicPext {
     Bitboard  mask;
     Bitboard *attacks;
@@ -35,6 +36,7 @@ struct alignas(64) MagicPext {
     }
 };
 
+// Magic bitboard entry for portable (multiply+shift) backend
 struct alignas(64) MagicMultiply {
     Bitboard  mask;
     Bitboard  magic;
@@ -47,6 +49,7 @@ struct alignas(64) MagicMultiply {
     }
 };
 
+// Precomputed attack tables
 alignas(64) extern Bitboard PawnAttacks[COLOR_NB][SQUARE_NB];
 alignas(64) extern Bitboard PawnPushes[COLOR_NB][SQUARE_NB];
 alignas(64) extern Bitboard PawnDoublePushes[COLOR_NB][SQUARE_NB];
@@ -56,17 +59,21 @@ alignas(64) extern Bitboard BetweenBB[SQUARE_NB][SQUARE_NB];
 alignas(64) extern Bitboard LineBB[SQUARE_NB][SQUARE_NB];
 alignas(64) extern Bitboard PseudoAttacks[PIECE_TYPE_NB][SQUARE_NB];
 
+// Magic tables for both backends
 alignas(64) extern MagicPext RookMagicsPext[SQUARE_NB];
 alignas(64) extern MagicPext BishopMagicsPext[SQUARE_NB];
 alignas(64) extern MagicMultiply RookMagicsMul[SQUARE_NB];
 alignas(64) extern MagicMultiply BishopMagicsMul[SQUARE_NB];
 
+// Flat storage for magic attack tables
 alignas(64) extern Bitboard RookTable[0x19000];
 alignas(64) extern Bitboard BishopTable[0x1480];
 
+// Function pointers for attack generation (selected at runtime based on BMI2 support)
 extern Bitboard (*g_rook_attacks)(Square sq, Bitboard occ);
 extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
 
+// Distance utilities
 [[nodiscard]] FORCE_INLINE constexpr int distance(Square a, Square b)
 {
     return std::max(std::abs(fileOf(a) - fileOf(b)), std::abs(rankOf(a) - rankOf(b)));
@@ -82,6 +89,7 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
     return std::abs(rankOf(a) - rankOf(b));
 }
 
+// Diagonal indices
 [[nodiscard]] FORCE_INLINE constexpr int diagonal_of(Square sq)
 {
     return 7 + rankOf(sq) - fileOf(sq);
@@ -92,6 +100,7 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
     return rankOf(sq) + fileOf(sq);
 }
 
+// Constexpr attack generation (used for table initialization)
 [[nodiscard]] FORCE_INLINE constexpr Bitboard pawn_attacks_bb(Color c, Square s)
 {
     Bitboard b = square_bb(s);
@@ -117,6 +126,7 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
            | ((b & ~FileABB) >> 9);
 }
 
+// Table lookup wrappers
 [[nodiscard]] FORCE_INLINE Bitboard pawn_attacks(Color c, Square sq)
 {
     return PawnAttacks[c][sq];
@@ -159,6 +169,7 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
     return bishop_attacks(sq, occ) | rook_attacks(sq, occ);
 }
 
+// Generic attack lookup by piece type
 [[nodiscard]] FORCE_INLINE Bitboard attacks_bb(PieceType pt, Square sq, Bitboard occupied)
 {
     if (pt == KNIGHT)
@@ -174,6 +185,7 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
     return 0;
 }
 
+// Between and line utilities
 [[nodiscard]] FORCE_INLINE Bitboard between_bb(Square s1, Square s2)
 {
     return BetweenBB[s1][s2];
@@ -189,6 +201,7 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
     return s3 != s1 && s3 != s2 && (LineBB[s1][s2] & square_bb(s3));
 }
 
+// LSB/MSB operations with square return
 [[nodiscard]] FORCE_INLINE Square lsb_sq(Bitboard b)
 {
     assert(b);
@@ -208,6 +221,7 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
     return s;
 }
 
+// Directional shifts
 [[nodiscard]] FORCE_INLINE constexpr Bitboard shift_north(Bitboard b)
 {
     return b << 8;
@@ -241,6 +255,7 @@ extern Bitboard (*g_bishop_attacks)(Square sq, Bitboard occ);
     return (b & ~FileABB) >> 9;
 }
 
+// Compile-time dispatched shift
 template <Direction D> [[nodiscard]] FORCE_INLINE constexpr Bitboard shift(Bitboard b)
 {
     if constexpr (D == NORTH)
@@ -262,6 +277,7 @@ template <Direction D> [[nodiscard]] FORCE_INLINE constexpr Bitboard shift(Bitbo
     return 0;
 }
 
+// Runtime dispatched shift
 [[nodiscard]] FORCE_INLINE Bitboard shift_direction(Bitboard b, Direction d)
 {
     switch (d)
@@ -287,6 +303,7 @@ template <Direction D> [[nodiscard]] FORCE_INLINE constexpr Bitboard shift(Bitbo
     }
 }
 
+// Fill north/south 
 [[nodiscard]] FORCE_INLINE Bitboard fill_north(Bitboard b)
 {
     b |= b << 8;
