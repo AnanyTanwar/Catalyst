@@ -272,7 +272,7 @@ int TT::hashfull() const
     if (!table || numClusters == 0)
         return 0;
 
-    // Sample the first 1000 clusters (matches UCI convention used by SF)
+    // Sample the first 1000 clusters 
     constexpr size_t SAMPLE = 1000;
     const size_t     count  = std::min(numClusters, SAMPLE);
 
