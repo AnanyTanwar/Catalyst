@@ -27,10 +27,6 @@
 #include <immintrin.h>
 #endif
 
-// Compilers won't always force-inline these tiny hot-path functions on
-// their own (especially in debug builds), so FORCE_INLINE spells it out
-// explicitly per-compiler. Falls back to a plain `inline` on anything
-// unrecognized.
 #if defined(__GNUC__) || defined(__clang__)
 #define FORCE_INLINE __attribute__((always_inline)) inline
 #elif defined(_MSC_VER)
@@ -43,10 +39,6 @@ namespace Catalyst {
 
 using Bitboard = uint64_t;
 
-// Returns the number of set bits in x (i.e. the number of pieces/squares
-// present in the bitboard). Maps to a single hardware POPCNT instruction
-// on GCC/Clang/MSVC; falls back to Kernighan's bit-clearing loop
-// (x &= x - 1 strips the lowest set bit each iteration) elsewhere.
 [[nodiscard]] FORCE_INLINE int popcount(uint64_t x)
 {
 #if defined(__GNUC__) || defined(__clang__)
@@ -64,14 +56,6 @@ using Bitboard = uint64_t;
 #endif
 }
 
-// Returns the index (0-63) of the least significant set bit of x - i.e.
-// the lowest-numbered occupied square in a bitboard. Used by pop_lsb()-style
-// "iterate all set bits" loops throughout move generation and search.
-//
-// CONTRACT: x must be non-zero. __builtin_ctzll and _BitScanForward64 are
-// both undefined behavior on a zero input, and this function does not
-// guard against it - callers are expected to have already checked
-// (e.g. via a `while (bb)` loop condition) before calling.
 [[nodiscard]] FORCE_INLINE int lsb(uint64_t x)
 {
 #if defined(__GNUC__) || defined(__clang__)
@@ -93,12 +77,6 @@ using Bitboard = uint64_t;
 #endif
 }
 
-// Returns the index (0-63) of the most significant set bit of x - i.e.
-// the highest-numbered occupied square in a bitboard.
-//
-// CONTRACT: same as lsb() above - x must be non-zero. __builtin_clzll and
-// _BitScanReverse64 are undefined behavior for x == 0, and this function
-// does not guard against it.
 [[nodiscard]] FORCE_INLINE int msb(uint64_t x)
 {
 #if defined(__GNUC__) || defined(__clang__)
@@ -117,17 +95,7 @@ using Bitboard = uint64_t;
 #endif
 }
 
-// Parallel bit extract: gathers the bits of src that fall under the set
-// bits of mask, and packs them contiguously into the low bits of the
-// result (in mask order, LSB first). This is the core primitive behind
-// PEXT-based magic bitboard attack lookups (see bitboard.cpp) - the
-// occupancy bits relevant to a sliding piece's attack rays are extracted
-// into a small dense index used to look up a precomputed attack table.
-//
-// On BMI2-capable hardware this compiles to the single PEXT instruction.
-// The #else branch is a bit-by-bit software emulation used both for non-
-// BMI2 builds and to compute lookup tables at startup/build time when
-// hardware PEXT isn't assumed available.
+// Parallel bit extract - gathers bits from src at positions where mask has 1s
 [[nodiscard]] FORCE_INLINE uint64_t pext(uint64_t src, uint64_t mask)
 {
 #if defined(__BMI2__)
@@ -147,14 +115,7 @@ using Bitboard = uint64_t;
 #endif
 }
 
-// Parallel bit deposit: the inverse of pext(). Takes the low bits of src
-// (in order) and scatters them into the positions marked by mask, leaving
-// all other bits 0. Used to reconstruct an occupancy bitboard from a dense
-// index - e.g. when enumerating every possible blocker configuration for a
-// magic bitboard table during initialization.
-//
-// Same hardware-vs-fallback split as pext(): a single PDEP instruction
-// under BMI2, otherwise a bit-by-bit software emulation.
+// Parallel bit deposit - inverse of pext
 [[nodiscard]] FORCE_INLINE uint64_t pdep(uint64_t src, uint64_t mask)
 {
 #if defined(__BMI2__)
@@ -174,12 +135,7 @@ using Bitboard = uint64_t;
 #endif
 }
 
-// Runtime check for BMI2 support via CPUID, independent of whether the
-// binary was *compiled* with -mbmi2. This lets a single release binary
-// (compiled for a baseline architecture) decide at startup whether it's
-// safe to dispatch to a BMI2-optimized code path, versus a build that was
-// compiled with __BMI2__ defined and can use the intrinsics unconditionally.
-// Always false on non-x86 targets, since BMI2 is an x86 extension.
+// Runtime BMI2 detection - allows single binary to support both backends
 [[nodiscard]] inline bool cpu_has_bmi2()
 {
 #if (defined(__x86_64__) || defined(_M_X64))
