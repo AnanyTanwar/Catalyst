@@ -464,13 +464,10 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
     if (board.is_draw(ply))
         return draw_score();
 
-    auto     probeResult = tt.probe(board.key());
-    bool     ttHit       = std::get<0>(probeResult);
-    TTData   ttData      = std::get<1>(probeResult);
-    TTWriter ttWriter    = std::get<2>(probeResult);
-    Move     ttMove      = MOVE_NONE;
-    int      ttScore     = SCORE_NONE;
-    TTFlag   ttFlag      = TT_NONE;
+    auto [ttHit, ttData, ttWriter] = tt.probe(board.key());
+    Move   ttMove                  = MOVE_NONE;
+    int    ttScore                 = SCORE_NONE;
+    TTFlag ttFlag                  = TT_NONE;
 
     if (ttHit)
     {
@@ -593,7 +590,8 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
     if (bestScore >= beta && !is_mate_score(bestScore) && !is_mate_score(beta))
         bestScore = ilerp(bestScore, beta, QS_FAILHIGH_LERP);
 
-    if (moveCount > 0 && !(stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes)))
+    if (moveCount > 0
+        && !(stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes)))
         && std::abs(bestScore) < SCORE_INFINITE)
     {
         TTFlag flag = (bestScore >= beta) ? TT_LOWER : TT_UPPER;
@@ -698,16 +696,13 @@ int Search::negamax(Board &board,
     }
 
     // ── TT probe ──────────────────────────────────────────────────────────────
-    auto     probeResult = tt.probe(board.key());
-    bool     ttHit       = std::get<0>(probeResult);
-    TTData   ttData      = std::get<1>(probeResult);
-    TTWriter ttWriter    = std::get<2>(probeResult);
-    Move     ttMove      = MOVE_NONE;
-    int      ttScore     = SCORE_NONE;
-    int      ttDepth     = 0;
-    int      ttEval      = SCORE_NONE;
-    TTFlag   ttFlag      = TT_NONE;
-    bool     ttPV        = pvNode;
+    auto [ttHit, ttData, ttWriter] = tt.probe(board.key());
+    Move   ttMove                  = MOVE_NONE;
+    int    ttScore                 = SCORE_NONE;
+    int    ttDepth                 = 0;
+    int    ttEval                  = SCORE_NONE;
+    TTFlag ttFlag                  = TT_NONE;
+    bool   ttPV                    = pvNode;
 
     if (ttHit && excludedMove == MOVE_NONE)
     {
@@ -1461,8 +1456,8 @@ int Search::negamax(Board &board,
         update_correction(board, ply, cur->staticEval, bestScore, depth, bestIsCap);
 
     // TT store — flag depends on whether we raised alpha or got cut.
-    if (!(stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))) && excludedMove == MOVE_NONE
-        && std::abs(bestScore) < SCORE_INFINITE)
+    if (!(stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes)))
+        && excludedMove == MOVE_NONE && std::abs(bestScore) < SCORE_INFINITE)
     {
         TTFlag flag;
         if (bestScore >= beta)
@@ -1549,7 +1544,9 @@ Move Search::best_move(Board &board, TimeManager &tm)
             {
                 score = negamax(board, depth, wAlpha, wBeta, 0, true, false);
 
-                if (score == 0 && (stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+                if (score == 0
+                    && (stopped.load(std::memory_order_relaxed)
+                        || (tm_ && tm_->time_up(info_.nodes))))
                     break;
                 if (stopped.load(std::memory_order_relaxed))
                     break;
@@ -1591,7 +1588,8 @@ Move Search::best_move(Board &board, TimeManager &tm)
             savedPV = pvTable_[0];
         }
 
-        if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))) && depth > 1)
+        if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes)))
+            && depth > 1)
             break;
         if (stopped.load(std::memory_order_relaxed) && depth > 1)
             break;
@@ -1651,7 +1649,6 @@ Move Search::best_move(Board &board, TimeManager &tm)
             bestScore       = score;
             info_.lastScore = score;
         }
-
 
         if (pvTable_[0].length == 0 && savedPV.length > 0)
             pvTable_[0] = savedPV;
