@@ -374,18 +374,19 @@ static FORCE_INLINE Move *generate_all_for_color(const Board &board, Move *list)
     return list;
 }
 
-template <GenType GT> Move *generate(const Board &board, Move *list)
+template <GenType GT> std::span<Move> generate(const Board &board, Move *list)
 {
-    return board.side_to_move() == WHITE ? generate_all_for_color<WHITE, GT>(board, list)
-                                         : generate_all_for_color<BLACK, GT>(board, list);
+    Move *end = board.side_to_move() == WHITE ? generate_all_for_color<WHITE, GT>(board, list)
+                                              : generate_all_for_color<BLACK, GT>(board, list);
+    return { list, static_cast<size_t>(end - list) };
 }
 
 // Explicit instantiation definitions matching the `extern template`
 // declarations in movegen.h - this is where the template code actually
 // gets compiled, once per GenType, in this translation unit only.
-template Move *generate<ALL_MOVES>(const Board &, Move *);
-template Move *generate<CAPTURES>(const Board &, Move *);
-template Move *generate<QUIETS>(const Board &, Move *);
+template std::span<Move> generate<ALL_MOVES>(const Board &, Move *);
+template std::span<Move> generate<CAPTURES>(const Board &, Move *);
+template std::span<Move> generate<QUIETS>(const Board &, Move *);
 
 // Generates pseudo-legal moves into a stack buffer, then filters through
 // is_legal() one at a time - simple and correct, but pays the cost of
@@ -396,13 +397,11 @@ MoveList generate_legal(Board &board)
 {
     MoveList legal;
 
-    Move  pseudoBuf[MAX_MOVES];
-    Move *pseudoEnd = generate<ALL_MOVES>(board, pseudoBuf);
-
-    for (Move *it = pseudoBuf; it != pseudoEnd; ++it)
+    Move pseudoBuf[MAX_MOVES];
+    for (Move m : generate<ALL_MOVES>(board, pseudoBuf))
     {
-        if (board.is_legal(*it))
-            legal.push(*it);
+        if (board.is_legal(m))
+            legal.push(m);
     }
 
     return legal;
