@@ -238,8 +238,8 @@ Move MovePicker::next_move()
 
 void MovePicker::generate_and_score_captures()
 {
-    Move *endPtr = generate<CAPTURES>(board, moves);
-    captEnd      = int(endPtr - moves);
+    auto captures = generate<CAPTURES>(board, moves);
+    captEnd       = static_cast<int>(captures.size());
 
     for (int i = 0; i < captEnd; ++i)
         scores[i] = score_capture(moves[i]);
@@ -268,8 +268,8 @@ void MovePicker::generate_and_score_captures()
 void MovePicker::generate_and_score_quiets()
 {
     Move *quietStart = moves + captEnd;
-    Move *endPtr     = generate<QUIETS>(board, quietStart);
-    quietEnd         = int(endPtr - moves);
+    auto  quiets     = generate<QUIETS>(board, quietStart);
+    quietEnd         = captEnd + static_cast<int>(quiets.size());
 
     int phIdx = pawn_history_index(board.pawn_key());
 
