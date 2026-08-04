@@ -131,3 +131,9 @@ Catalyst would not exist without the broader chess programming community. In no 
 - [Alexandria](https://github.com/PGG106/Alexandria)
 - [Obsidian](https://github.com/gab8192/Obsidian)
 - [bullet](https://github.com/jw1912/bullet) — NNUE trainer
+
+---
+
+# License
+
+Catalyst is licensed under the GPL-3.0 License. See [LICENSE](LICENSE) for details.
