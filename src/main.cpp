@@ -22,6 +22,7 @@
 
 #include <iostream>
 #include <pthread.h>
+#include <string>
 
 using namespace Catalyst;
 
@@ -32,7 +33,7 @@ static void *uci_thread(void *)
     return nullptr;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
     init_bitboards();
     Zobrist::init();
@@ -40,6 +41,17 @@ int main()
 
     std::cerr << ENGINE_NAME << " " << ENGINE_VERSION << " by " << ENGINE_AUTHOR << "\n";
     std::cerr.flush();
+
+    if (argc > 1)
+    {
+        std::string command;
+        for (int i = 1; i < argc; ++i)
+            command += (i > 1 ? " " : "") + std::string(argv[i]);
+
+        UCI uci;
+        uci.run_command_line(command);
+        return 0;
+    }
 
     pthread_t      thread;
     pthread_attr_t attr;
