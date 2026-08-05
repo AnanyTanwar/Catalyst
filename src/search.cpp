@@ -34,6 +34,11 @@ namespace Catalyst {
 
 int LMRTable[2][64][64];
 
+template <typename T, size_t N> static void zero_array(T (&arr)[N])
+{
+    std::memset(arr, 0, sizeof(arr));
+}
+
 void init_lmr()
 {
     // base + scale * log(depth) * log(moveCount)
@@ -57,18 +62,19 @@ void Search::clear_tables()
 {
     // Full reset of all heuristic tables. Called on ucinewgame, NOT between moves —
     // we want history to persist across moves within a game.
-    std::memset(history_, 0, sizeof(history_));
-    std::memset(pieceToHistory_, 0, sizeof(pieceToHistory_));
-    std::memset(captureHistory_, 0, sizeof(captureHistory_));
-    std::memset(pawnHistory_, 0, sizeof(pawnHistory_));
-    std::memset(counterMoves_, 0, sizeof(counterMoves_));
-    std::memset(killers_, 0, sizeof(killers_));
-    std::memset(contHistTable_, 0, sizeof(contHistTable_));
-    std::memset(corrMain_, 0, sizeof(corrMain_));
-    std::memset(corrPawn_, 0, sizeof(corrPawn_));
-    std::memset(corrNonPawnWhite_, 0, sizeof(corrNonPawnWhite_));
-    std::memset(corrNonPawnBlack_, 0, sizeof(corrNonPawnBlack_));
-    std::memset(contCorr_, 0, sizeof(contCorr_));
+    zero_array(history_);
+    zero_array(pieceToHistory_);
+    zero_array(captureHistory_);
+    zero_array(pawnHistory_);
+    zero_array(counterMoves_);
+    zero_array(killers_);
+    zero_array(contHistTable_);
+    zero_array(corrMain_);
+    zero_array(corrPawn_);
+    zero_array(corrNonPawnWhite_);
+    zero_array(corrNonPawnBlack_);
+    zero_array(contCorr_);
+
     for (auto &pv : pvTable_)
         pv.length = 0;
     for (auto &s : stack_)
