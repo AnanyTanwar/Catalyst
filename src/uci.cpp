@@ -73,73 +73,91 @@ void UCI::join_search()
         searchThread_.join();
 }
 
+void UCI::execute_command(const std::string &command)
+{
+    std::istringstream iss(command);
+    std::string        token;
+    if (!(iss >> token))
+        return;
+
+    if (token == "uci")
+        cmd_uci();
+    else if (token == "isready")
+    {
+        join_search();
+        cmd_isready();
+    }
+    else if (token == "ucinewgame")
+    {
+        join_search();
+        cmd_ucinewgame();
+    }
+    else if (token == "position")
+    {
+        join_search();
+        cmd_position(iss);
+    }
+    else if (token == "go")
+        cmd_go(iss);
+    else if (token == "stop")
+        cmd_stop();
+    else if (token == "ponderhit")
+        cmd_ponderhit();
+    else if (token == "setoption")
+        cmd_setoption(iss);
+    else if (token == "bench")
+    {
+        join_search();
+        cmd_bench(iss);
+    }
+    else if (token == "d")
+    {
+        join_search();
+        cmd_display();
+    }
+    else if (token == "perft")
+    {
+        join_search();
+        cmd_perft(iss);
+    }
+    else if (token == "eval")
+    {
+        join_search();
+        cmd_eval();
+    }
+    else if (token == "datagen")
+    {
+        join_search();
+        cmd_datagen(iss);
+    }
+}
+
+void UCI::run_command_line(const std::string &command)
+{
+    execute_command(command);
+    join_search();
+}
+
 void UCI::loop()
 {
-    std::string line, token;
+    std::string line;
     std::cout.setf(std::ios::unitbuf);
 
     while (std::getline(std::cin, line))
     {
-        std::istringstream iss(line);
-        if (!(iss >> token))
+        std::istringstream check(line);
+        std::string        token;
+        if (!(check >> token))
             continue;
 
-        if (token == "uci")
-            cmd_uci();
-        else if (token == "isready")
-        {
-            join_search();
-            cmd_isready();
-        }
-        else if (token == "ucinewgame")
-        {
-            join_search();
-            cmd_ucinewgame();
-        }
-        else if (token == "position")
-        {
-            join_search();
-            cmd_position(iss);
-        }
-        else if (token == "go")
-            cmd_go(iss);
-        else if (token == "stop")
-            cmd_stop();
-        else if (token == "ponderhit")
-            cmd_ponderhit();
-        else if (token == "setoption")
-            cmd_setoption(iss);
-        else if (token == "bench")
-        {
-            join_search();
-            cmd_bench(iss);
-        }
-        else if (token == "d")
-        {
-            join_search();
-            cmd_display();
-        }
-        else if (token == "perft")
-        {
-            join_search();
-            cmd_perft(iss);
-        }
-        else if (token == "eval")
-        {
-            join_search();
-            cmd_eval();
-        }
-        else if (token == "datagen")
-        {
-            join_search();
-            cmd_datagen(iss);
-        }
-        else if (token == "quit")
+        if (token == "quit")
         {
             cmd_stop();
             join_search();
             break;
         }
+
+        execute_command(line);
     }
 }
 
@@ -327,16 +345,11 @@ void UCI::cmd_stop()
     join_search();
 }
 
-// Safely parses an integer option value. Returns false (and leaves out
-// untouched) if value is empty or not a valid integer, instead of relying
-// on std::stoi's throw-on-failure behavior (exceptions are disabled build-wide).
 static bool try_parse_int(const std::string &value, int &out)
 {
     if (value.empty())
         return false;
 
-    // Skip leading whitespace, since setoption values can have it depending
-    // on how the token was built above.
     const char *begin = value.c_str();
     const char *end   = begin + value.size();
     while (begin < end && *begin == ' ')
@@ -519,4 +532,4 @@ void UCI::cmd_datagen(std::istringstream &iss)
     Datagen::run(cfg);
 }
 
-}  // namespace Catalyst
+}

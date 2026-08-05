@@ -40,6 +40,8 @@ public:
     UCI();
     ~UCI();
     void loop();
+    void execute_command(const std::string &command);
+    void run_command_line(const std::string &command);
 
 private:
     Board board;
@@ -75,4 +77,4 @@ private:
     void cmd_datagen(std::istringstream &iss);
 };
 
-}  // namespace Catalyst
+}
