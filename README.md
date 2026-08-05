@@ -36,7 +36,7 @@ Choose the binary that matches your CPU:
 
 # Building from source
 
-Requires GCC ≥ 13 or Clang ≥ 16, `objcopy`, and CMake ≥ 3.16 (for CMake builds). The NNUE weights are downloaded and embedded automatically at build time.
+Requires GCC ≥ 13 or Clang ≥ 16, and CMake ≥ 3.16 (for CMake builds). The NNUE weights are downloaded and embedded automatically at build time.
 
 ```bash
 git clone https://github.com/AnanyTanwar/Catalyst
