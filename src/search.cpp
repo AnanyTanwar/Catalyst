@@ -455,7 +455,7 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
     if (sharedNodes_)
         sharedNodes_->fetch_add(1, std::memory_order_relaxed);
 
-    if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+    if (should_stop())
         return 0;
     if (ply >= MAX_PLY - 1)
         return adjusted_eval(board, ply);
@@ -570,7 +570,7 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
         accStack_.pop();
         --stateSP_;
 
-        if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+        if (should_stop())
             return 0;
 
         if (score > bestScore)
@@ -590,9 +590,7 @@ int Search::quiescence(Board &board, int alpha, int beta, int ply)
     if (bestScore >= beta && !is_mate_score(bestScore) && !is_mate_score(beta))
         bestScore = ilerp(bestScore, beta, QS_FAILHIGH_LERP);
 
-    if (moveCount > 0
-        && !(stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes)))
-        && std::abs(bestScore) < SCORE_INFINITE)
+    if (moveCount > 0 && !should_stop() && std::abs(bestScore) < SCORE_INFINITE)
     {
         TTFlag flag = (bestScore >= beta) ? TT_LOWER : TT_UPPER;
         int    storeEval
@@ -633,7 +631,7 @@ int Search::negamax(Board &board,
     if (sharedNodes_)
         sharedNodes_->fetch_add(1, std::memory_order_relaxed);
 
-    if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+    if (should_stop())
         return 0;
     if (ply >= MAX_PLY - 1)
         return adjusted_eval(board, ply);
@@ -928,7 +926,7 @@ int Search::negamax(Board &board,
                 accStack_.pop();
                 --stateSP_;
 
-                if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+                if (should_stop())
                     return 0;
 
                 if (nullScore >= beta)
@@ -995,7 +993,7 @@ int Search::negamax(Board &board,
             accStack_.pop();
             --stateSP_;
 
-            if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+            if (should_stop())
                 return 0;
 
             if (pcScore >= pcBeta)
@@ -1322,7 +1320,7 @@ int Search::negamax(Board &board,
         --stateSP_;
         accStack_.pop();
 
-        if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+        if (should_stop())
             return 0;
 
         if (score > bestScore)
@@ -1451,13 +1449,11 @@ int Search::negamax(Board &board,
 
     // Correction history update
     bool bestIsCap = (bestMove != MOVE_NONE) && board.is_capture(bestMove);
-    if (excludedMove == MOVE_NONE && staticEval != SCORE_NONE
-        && !(stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes))))
+    if (excludedMove == MOVE_NONE && staticEval != SCORE_NONE && !should_stop())
         update_correction(board, ply, cur->staticEval, bestScore, depth, bestIsCap);
 
     // TT store — flag depends on whether we raised alpha or got cut.
-    if (!(stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes)))
-        && excludedMove == MOVE_NONE && std::abs(bestScore) < SCORE_INFINITE)
+    if (!should_stop() && excludedMove == MOVE_NONE && std::abs(bestScore) < SCORE_INFINITE)
     {
         TTFlag flag;
         if (bestScore >= beta)
@@ -1544,9 +1540,7 @@ Move Search::best_move(Board &board, TimeManager &tm)
             {
                 score = negamax(board, depth, wAlpha, wBeta, 0, true, false);
 
-                if (score == 0
-                    && (stopped.load(std::memory_order_relaxed)
-                        || (tm_ && tm_->time_up(info_.nodes))))
+                if (score == 0 && should_stop())
                     break;
                 if (stopped.load(std::memory_order_relaxed))
                     break;
@@ -1588,8 +1582,7 @@ Move Search::best_move(Board &board, TimeManager &tm)
             savedPV = pvTable_[0];
         }
 
-        if ((stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes)))
-            && depth > 1)
+        if (should_stop() && depth > 1)
             break;
         if (stopped.load(std::memory_order_relaxed) && depth > 1)
             break;
