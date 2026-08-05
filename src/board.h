@@ -219,9 +219,11 @@ public:
     // after the fact via is_draw().
     [[nodiscard]] bool has_game_cycle(int ply) const;
 
-    // Debug helper: prints a human-readable ASCII board plus key state
+    // Debug helper: prints a board plus key state
     // (side to move, castling rights, ep square, etc.) to stdout.
-    void display() const;
+    // If eval is provided (anything other than SCORE_NONE), appends an
+    // "Eval: <score> cp" line at the end.
+    void display(int eval = SCORE_NONE) const;
 
     // Flat history of Zobrist keys for the whole game (not just the current
     // search), used by is_repetition()/is_draw() to detect repetition against
