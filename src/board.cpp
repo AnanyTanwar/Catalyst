@@ -1023,7 +1023,7 @@ bool Board::is_draw(int ply) const
     return false;
 }
 
-void Board::display() const
+void Board::display(int eval) const
 {
     const char *pieceChars = " PNBRQK  pnbrqk";
     std::cout << "\n  +---+---+---+---+---+---+---+---+\n";
@@ -1038,7 +1038,11 @@ void Board::display() const
     std::cout << "\nFEN: " << get_fen() << '\n';
     std::cout << "Key: 0x" << std::hex << st->key << std::dec << '\n';
     std::cout << "Checkers: " << popcount(st->checkersBB) << '\n';
-    std::cout << (sideToMove == WHITE ? "White" : "Black") << " to move\n\n";
+    std::cout << (sideToMove == WHITE ? "White" : "Black") << " to move\n";
+    if (eval != SCORE_NONE)
+        std::cout << "Eval: " << eval << " cp (" << (sideToMove == WHITE ? "White" : "Black")
+                  << "'s perspective)\n";
+    std::cout << '\n';
 }
 
 Square Board::castling_rook_square(CastlingRights cr) const

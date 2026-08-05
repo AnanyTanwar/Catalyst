@@ -431,8 +431,7 @@ void UCI::cmd_display()
 void UCI::cmd_eval()
 {
     int score = NNUE::evaluate(board);
-    std::cout << "NNUE eval (STM): " << score << " cp\n";
-    std::cout << "Side to move: " << (board.side_to_move() == WHITE ? "white" : "black") << "\n";
+    board.display(score);
     std::cout.flush();
 }
 
