@@ -333,6 +333,11 @@ private:
 
     static bool is_mate_score(int s) { return std::abs(s) >= SCORE_MATE_IN_MAX_PLY; }
 
+    bool should_stop() const
+    {
+        return stopped.load(std::memory_order_relaxed) || (tm_ && tm_->time_up(info_.nodes));
+    }
+
     void print_info(const Board &board,
         int                      depth,
         int                      score,
