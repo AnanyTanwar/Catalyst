@@ -1513,6 +1513,7 @@ Move Search::best_move(Board &board, TimeManager &tm)
     int    bestScore = 0;
     int    prevScore = 0;
     PvList savedPV { };
+    PvList lastGoodPV { };  // full PV from the last depth that fully completed
 
     // Lazy SMP depth perturbation: helper threads start at slightly different depths
     // to explore different parts of the tree and avoid duplicating the main thread's work.
@@ -1589,9 +1590,17 @@ Move Search::best_move(Board &board, TimeManager &tm)
         }
 
         if (should_stop() && depth > 1)
+        {
+            if (pvTable_[0].length == 0 && lastGoodPV.length > 0)
+                pvTable_[0] = lastGoodPV;
             break;
+        }
         if (stopped.load(std::memory_order_relaxed) && depth > 1)
+        {
+            if (pvTable_[0].length == 0 && lastGoodPV.length > 0)
+                pvTable_[0] = lastGoodPV;
             break;
+        }
 
         if (info_.bestMove != MOVE_NONE && board.is_legal(info_.bestMove))
         {
@@ -1651,6 +1660,8 @@ Move Search::best_move(Board &board, TimeManager &tm)
 
         if (pvTable_[0].length == 0 && savedPV.length > 0)
             pvTable_[0] = savedPV;
+        if (pvTable_[0].length > 0)
+            lastGoodPV = pvTable_[0];
         if (!isSilent)
         {
             uint64_t reportNodes

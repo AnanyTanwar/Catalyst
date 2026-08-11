@@ -291,6 +291,13 @@ void UCI::cmd_go(std::istringstream &iss)
     searchThread_ = std::thread([this, capturedPonderMove, capturedApplied]() {
         Move best = pool_->search(board, timeman);
 
+        // UCI: even if the search finished internally (max depth, mate found,
+        // etc.), we must not report bestmove while pondering — only
+        // "ponderhit" or "stop" may end pondering. Busy-wait like Stockfish
+        // does; cmd_ponderhit()/cmd_stop() will end this.
+        while (isPondering_.load(std::memory_order_relaxed) && !timeman.is_stopped())
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
         if (best == MOVE_NONE)
         {
             MoveList legal = generate_legal(board);
@@ -331,12 +338,13 @@ void UCI::cmd_go(std::istringstream &iss)
 
 void UCI::cmd_ponderhit()
 {
-    if (!isPondering_)
+    if (!isPondering_.load(std::memory_order_relaxed))
     {
         cmd_stop();
         return;
     }
     timeman.ponderhit(ponderStm_, options.moveOverhead);
+    isPondering_.store(false, std::memory_order_relaxed);
 }
 
 void UCI::cmd_stop()

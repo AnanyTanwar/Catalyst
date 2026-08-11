@@ -191,6 +191,8 @@ public:
         return (pvTable_[0].length >= 2) ? pvTable_[0].moves[1] : MOVE_NONE;
     }
 
+    int pv_length() const { return pvTable_[0].length; }
+
     // Root PV as found by this thread's most recent search — used by
     // ThreadPool::best_thread() to adopt the winning thread's line for
     // "info pv" / ponder-move purposes.
