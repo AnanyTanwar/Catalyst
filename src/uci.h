@@ -54,10 +54,10 @@ private:
 
     std::thread searchThread_;
 
-    Move      ponderMove_ = MOVE_NONE;
-    StateInfo ponderState_;
-    bool      isPondering_ = false;
-    Color     ponderStm_   = WHITE;
+    Move              ponderMove_ = MOVE_NONE;
+    StateInfo         ponderState_;
+    std::atomic<bool> isPondering_ { false };
+    Color             ponderStm_ = WHITE;
 
     void join_search();
 

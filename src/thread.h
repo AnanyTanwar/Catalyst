@@ -43,6 +43,7 @@ public:
     // returned as bestmove by the most recent search() call — NOT always
     // main_, since best_thread() may have picked a helper.
     Move ponder_move() const { return lastWinner_ ? lastWinner_->ponder_move() : MOVE_NONE; }
+    int  last_pv_length() const { return lastWinner_ ? lastWinner_->pv_length() : -1; }
     int  thread_count() const { return int(helpers_.size()) + 1; }
 
 private:
